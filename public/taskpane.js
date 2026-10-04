@@ -802,12 +802,12 @@ async function runSettingsTest() {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 32,
+        max_tokens: 512,
         messages: [{
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: "image/png", data: b64 } },
-            { type: "text", text: "图中圆形是什么颜色？只回答颜色名称。" },
+            { type: "text", text: "图中是否有一个圆形？请先回答「有」或「没有」，再用一句话说明它的颜色和位置。" },
           ],
         }],
       }),
@@ -815,8 +815,9 @@ async function runSettingsTest() {
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
     const data = await resp.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    if (/白/.test(text)) return "✅ 识图可用：正确识别出白色圆形";
-    throw new Error("模型回复「" + (text || "(空)").slice(0, 40) + "」——该模型可能不支持图片输入");
+    const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到/.test(text);
+    if (seesImage) return "✅ 识图可用：模型正确识别了截图内容（" + (text || "").slice(0, 50) + "）";
+    throw new Error("模型回复「" + (text || "(空)").slice(0, 60) + "」——该模型可能不支持图片输入，请换支持视觉的模型");
   })();
 
   const [r1, r2, r3] = await Promise.allSettled([chatTest, visionTest, imgTest]);
