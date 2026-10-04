@@ -66,7 +66,9 @@ function setStatus(text) {
 }
 function setBusy(v) {
   busy = v;
-  $("sendBtn").disabled = v;
+  const btn = $("sendBtn");
+  btn.disabled = false;
+  btn.textContent = v ? "停止" : "发送";
 }
 
 /* ---------------- 系统提示词 ---------------- */
@@ -337,8 +339,8 @@ async function generateImage({ prompt, aspect_ratio }) {
 
 function goToSlide(index1based) {
   return new Promise((resolve, reject) => {
-    Office.context.document.goToByIdAsync(index1based, { idType: Office.IdType.Index }, (r) => {
-      if (r.status === Office.AsyncResultStatus.Succeeded) resolve(true);
+    Office.context.document.goToByIdAsync(index1based, { idType: "index" }, (r) => {
+      if (r.status === "succeeded") resolve(true);
       else reject(new Error((r.error && r.error.message) || "跳转幻灯片失败"));
     });
   });
@@ -346,8 +348,8 @@ function goToSlide(index1based) {
 
 function setSelectedImage(b64, opts) {
   return new Promise((resolve, reject) => {
-    Office.context.document.setSelectedDataAsync(b64, Object.assign({ coercionType: Office.CoercionType.Image }, opts), (r) => {
-      if (r.status === Office.AsyncResultStatus.Succeeded) resolve(true);
+    Office.context.document.setSelectedDataAsync(b64, Object.assign({ coercionType: "image" }, opts), (r) => {
+      if (r.status === "succeeded") resolve(true);
       else reject(new Error((r.error && r.error.message) || "插入图片失败"));
     });
   });
@@ -375,10 +377,18 @@ async function addImage({ imageId, slideIndex, left, top, width, height }) {
   if (width != null) pos.imageWidth = Number(width);
   if (height != null) pos.imageHeight = Number(height);
   // 主通道：通用 API（Office 2013 起全平台可用）——先跳到目标页，再按坐标插入
-  if (slideIndex != null) await goToSlide(Number(slideIndex) + 1);
+  let jumpFailed = false;
+  if (slideIndex != null) {
+    try { await goToSlide(Number(slideIndex) + 1); }
+    catch (e) {
+      // 跳页失败不致命：图片将插入当前显示页
+      jumpFailed = true;
+      log("goToSlide 失败（忽略）: " + String((e && e.message) || e));
+    }
+  }
   try {
     await setSelectedImage(b64, pos);
-    return { ok: true, via: "setSelectedDataAsync" };
+    return { ok: true, via: "setSelectedDataAsync", jumpFailed, note: jumpFailed ? "未能跳页，图片插在了当前显示页" : undefined };
   } catch (e1) {
     log("setSelectedDataAsync 插图失败，改用富 API addImage: " + String((e1 && e1.message) || e1));
   }
@@ -543,9 +553,13 @@ function detectCaps() {
 
 /* 事件绑定不依赖宿主初始化，立即执行 */
 function wireUI() {
-  $("sendBtn").addEventListener("click", onSend);
+  $("sendBtn").addEventListener("click", () => {
+    if (busy) { if (abortCtrl) abortCtrl.abort(); return; }
+    onSend();
+  });
   $("input").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); onSend(); }
+    if (ev.key === "Escape" && busy && abortCtrl) abortCtrl.abort();
   });
   $("newChatBtn").addEventListener("click", () => {
     if (abortCtrl) abortCtrl.abort();
