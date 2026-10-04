@@ -4,6 +4,7 @@ logs/
 
 # 测试响应产物（保留请求 payload 作为用例）
 tests/resp_*
+tests/exp-*
 
 # 依赖与系统文件
 node_modules/

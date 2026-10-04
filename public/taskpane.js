@@ -380,22 +380,14 @@ async function generateImage({ prompt, aspect_ratio }) {
   return { ok: true, imageId: id, fileType: (dataUrl.match(/^data:([^;]+)/) || [])[1] || "image", byteSize: blob.size, next: "调用 add_image 并传入该 imageId 插入幻灯片" };
 }
 
-/* 截图审查：导出 pptx -> 服务端 PowerPoint COM 渲染逐页 PNG */
+/* 截图审查：本地服务经 PowerPoint COM 直接渲染当前打开的演示文稿 */
 let slideShots = null;
 
 async function exportSlidesForReview() {
-  let b64 = null;
-  await PowerPoint.run(async (ctx) => {
-    const slides = ctx.presentation.slides;
-    const result = slides.exportAsBase64Presentation();
-    await ctx.sync();
-    b64 = result && result.value;
-  });
-  if (!b64) throw new Error("演示文稿导出为空（exportAsBase64Presentation 未返回数据）");
   const resp = await fetch("/api/export-slides", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pptx_base64: b64 }),
+    body: "{}",
   });
   if (!resp.ok) throw new Error("截图渲染服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
   const data = await resp.json();
@@ -405,7 +397,7 @@ async function exportSlidesForReview() {
 
 async function screenshotSlides() {
   const shots = await exportSlidesForReview();
-  return { ok: true, count: shots.count, note: "逐页截图已生成并缓存。用 review_slide({index}) 查看某页的真实渲染效果。" };
+  return { ok: true, count: shots.count, note: "逐页截图已生成并缓存（当前打开的演示文稿）。用 review_slide({index}) 查看某页的真实渲染效果。" };
 }
 
 async function reviewSlide({ index }) {

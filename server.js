@@ -240,19 +240,19 @@ async function handleForward(req, res) {
   }
 }
 
-/* ---------- 幻灯片截图渲染（PowerPoint COM）---------- */
+/* ---------- 幻灯片截图渲染（PowerPoint COM，附着当前活动演示文稿）---------- */
 let exportLock = Promise.resolve();
 
-function runExportScript(pptxPath, outDir) {
+function runExportScript(outDir) {
   const script = path.join(__dirname, "scripts", "export-slides.ps1");
   return new Promise((resolve, reject) => {
     execFile(
       "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-PptxPath", pptxPath, "-OutDir", outDir],
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-OutDir", outDir],
       { timeout: 120000 },
       (err, stdout, stderr) => {
         if (err) {
-          return reject(new Error("COM 渲染失败: " + String(err.message || err).slice(0, 200) + " " + String(stderr || "").slice(0, 300)));
+          return reject(new Error("COM 渲染失败: " + String(err.message || err).slice(0, 200) + " " + String(stdout || "") + String(stderr || "").slice(0, 300)));
         }
         resolve();
       }
@@ -260,12 +260,10 @@ function runExportScript(pptxPath, outDir) {
   });
 }
 
-async function doExportSlides(pptxB64) {
+async function doExportSlides() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slilot-export-"));
   try {
-    const pptxPath = path.join(tmp, "deck.pptx");
-    fs.writeFileSync(pptxPath, Buffer.from(pptxB64, "base64"));
-    await runExportScript(pptxPath, tmp);
+    await runExportScript(tmp);
     const manifestTxt = fs.readFileSync(path.join(tmp, "manifest.txt"), "utf8");
     const files = manifestTxt.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const images = files.map((p, i) => ({ index: i, base64: fs.readFileSync(p).toString("base64") }));
@@ -276,16 +274,8 @@ async function doExportSlides(pptxB64) {
 }
 
 async function handleExportSlides(req, res) {
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
-  let pptxB64;
-  try { pptxB64 = JSON.parse(Buffer.concat(chunks).toString("utf8")).pptx_base64; } catch (e) {}
-  if (!pptxB64) {
-    res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify({ error: "缺少 pptx_base64" }));
-  }
   // 串行执行，避免多个 COM 实例互相干扰
-  const run = exportLock.then(() => doExportSlides(pptxB64));
+  const run = exportLock.then(() => doExportSlides());
   exportLock = run.catch(() => {});
   const out = await run;
   res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
