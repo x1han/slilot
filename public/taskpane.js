@@ -24,6 +24,7 @@ let canvas = { w: 960, h: 540 }; // 最近一次检测到的画布尺寸(pt)
 let messages = [];           // Anthropic 格式消息数组
 let busy = false;
 let abortCtrl = null;
+let toolCount = 0;           // 当前任务已执行的工具数（状态栏隐式进度）
 
 function loadSettings() {
   try {
@@ -83,13 +84,21 @@ function systemPrompt() {
     "- 产出页面级规划：每页的标题、核心内容（要点/表格数据）、配图需求（写好具体生图提示词）、版式布局（各元素的坐标与大小）。",
     "- 用几行向用户展示规划（每页一行），然后立即进入实现，不要等用户批准。",
     "",
-    "### 2) Implement（逐页实现，禁止把配图攒到最后统一处理）",
+    "### 2) Implement（逐页实现 + 页内自检，禁止把配图攒到最后统一处理）",
     "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image）→ style_text 统一风格。",
-    "- 一页完全做完再做下一页；相互独立的操作尽量并行调用（一轮多个工具）。",
+    "- 每页元素放完后必须立即做「页内自检」：read_slide 该页，用下方几何公式逐形状检查溢出/重叠/越界，发现问题当场修复（调坐标、调字号、删了重摆），自检通过才能进入下一页。",
+    "- 相互独立的操作尽量并行调用（一轮多个工具）。",
     "- 大段数据表格：用多个 add_textbox 网格化搭建，注意列对齐（同一列 x 相同、行高一致）。",
     "",
+    "### 几何自检公式（页内自检与最终 Review 都必须用它，凭数据说话，不凭感觉）",
+    "- 文本宽度估算：中文/全角字符宽 ≈ 1×字号(pt)，英文/数字/半角 ≈ 0.55×字号；",
+    "- 行数 ≈ ceil(文本总宽 ÷ 文本框宽)；所需高度 ≈ 行数 × 字号 × 1.4。所需高度 > 框高即为溢出 → 加宽/加高、精简文字或减小字号；",
+    "- 重叠判定：两个矩形的 x 区间与 y 区间同时相交（允许 2pt 容差）即为重叠 → 移开或缩小其中一个；",
+    "- 越界判定：left<0 或 top<0 或 left+width>画布宽 或 top+height>画布高 → 收回画布内；",
+    "- 大数字（60-72pt）特例：所需宽 ≈ 字符数 × 0.6 × 字号（中文单位按 1×字号），先算宽再定框宽；大数字与下方标签的垂直间距 ≥ 0.6×字号，否则必然压字。",
+    "",
     "### 3) Review（审查与修复，必做）",
-    "- 全部页面完成后，用 get_presentation_overview + read_slide 逐页复查：",
+    "- 全部页面完成后，用 get_presentation_overview + read_slide 逐页复查（重叠/溢出/越界一律用几何公式计算）：",
     "  a) 元素越界画布、相互重叠、相互遮挡；",
     "  b) 图片与该页内容是否匹配、比例是否协调；",
     "  c) 文字是否溢出文本框、字号层级是否清晰（页标题 ≥28pt，正文 14-18pt）；",
@@ -463,7 +472,7 @@ function log(msg) {
   } catch (e) {}
 }
 function showFatal(msg) {
-  $("capBadge").textContent = "⚠ " + msg;
+  $("modelName").textContent = "⚠ " + msg;
   log("致命: " + msg);
 }
 
@@ -508,6 +517,7 @@ async function callApi(body, signal) {
 async function runTurn(userText) {
   messages.push({ role: "user", content: userText });
   abortCtrl = new AbortController();
+  toolCount = 0;
   const MAX_ROUNDS = 1000;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -528,17 +538,15 @@ async function runTurn(userText) {
         const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
         const results = [];
         for (const tu of toolUses) {
-          setStatus("第 " + (round + 1) + " 轮 · 执行: " + tu.name);
-          const chip = addToolChip("🔧 " + tu.name + " " + JSON.stringify(tu.input || {}).slice(0, 160), false);
+          toolCount++;
+          setStatus("第 " + (round + 1) + " 轮 · 已执行 " + toolCount + " 个工具 · " + tu.name);
           let resultStr;
           try {
             const out = await execTool(tu.name, tu.input);
             resultStr = JSON.stringify(out);
-            chip.textContent = "🔧 " + tu.name + " ✓";
           } catch (e) {
             resultStr = JSON.stringify({ error: String((e && e.message) || e) });
-            chip.textContent = "🔧 " + tu.name + " ✗ " + String((e && e.message) || e).slice(0, 120);
-            chip.classList.add("err");
+            addToolChip("✗ " + tu.name + "：" + String((e && e.message) || e).slice(0, 140), true);
             log("工具失败 " + tu.name + ": " + String((e && e.message) || e).slice(0, 300));
           }
           results.push({ type: "tool_result", tool_use_id: tu.id, content: resultStr.slice(0, 60000) });
@@ -579,15 +587,11 @@ function detectCaps() {
       if (reqs.isSetSupported("PowerPointApi", v)) sets.push("PowerPointApi " + v);
     });
     capSets = sets;
-    $("capBadge").textContent = "宿主: PowerPoint ✓  |  能力: " + (sets.join(", ") || "基本") +
-      "  |  模型: " + settings.model;
     log("能力检测: " + (sets.join(", ") || "基本"));
     // 黑匣子：记录实际可用的 JS 表面（方法原型），用于诊断"能力集已报但方法缺失"类问题
     try {
       const shapeKeys = Object.getOwnPropertyNames(PowerPoint.ShapeCollection.prototype).filter((k) => k[0] !== "_");
-      const slideKeys = Object.getOwnPropertyNames(PowerPoint.SlideCollection.prototype).filter((k) => k[0] !== "_");
       log("Surface ShapeCollection: " + shapeKeys.join(","));
-      log("Surface SlideCollection: " + slideKeys.join(","));
     } catch (e) {
       log("Surface 探测失败: " + String((e && e.message) || e));
     }
@@ -596,9 +600,9 @@ function detectCaps() {
       log("JS资源: " + res.join(", "));
     } catch (e) {}
   } catch (e) {
-    $("capBadge").textContent = "能力检测失败: " + String((e && e.message) || e);
     log("能力检测失败: " + String((e && e.message) || e));
   }
+  $("modelName").textContent = settings.model || DEFAULT_SETTINGS.model;
 }
 
 /* 事件绑定不依赖宿主初始化，立即执行 */
@@ -615,11 +619,8 @@ function wireUI() {
     if (abortCtrl) abortCtrl.abort();
     messages = [];
     const chat = $("chat");
-    while (chat.children.length > 1) chat.removeChild(chat.lastChild);
+    while (chat.firstChild) chat.removeChild(chat.firstChild);
     setStatus(null);
-  });
-  Array.prototype.forEach.call(document.querySelectorAll(".chip"), (c) => {
-    c.addEventListener("click", () => { $("input").value = c.textContent; $("input").focus(); });
   });
   $("settingsBtn").addEventListener("click", openSettings);
   $("setTest").addEventListener("click", runSettingsTest);
@@ -648,7 +649,7 @@ function init() {
         const host = (info && info.host) || "";
         log("onReady 触发, host=" + (host || "(空)"));
         if (host && host !== "PowerPoint") {
-          $("capBadge").textContent = "⚠ 请在 PowerPoint 中打开此面板（当前宿主: " + host + "）";
+          $("modelName").textContent = "⚠ 请在 PowerPoint 中打开此面板";
         }
         detectCaps();
       } catch (e) {
