@@ -28,7 +28,9 @@ let toolCount = 0;           // 当前任务已执行的工具数（状态栏隐
 let runGen = 0;              // 会话代号：新会话/中止时递增，旧回路据此静默退出
 let docVersion = 0;          // 文档修改版本号：截图缓存据此失效
 let compactionAttempts = 0;  // 摘要压缩尝试次数（每次运行最多 2 次）
-const COMPACT_THRESHOLD = 2 * 1024 * 1024; // 2MB：一张审查截图就有几百 KB，阈值过低会导致压缩过早频繁触发
+// 单位是 JSON 字符数，不是 token：中文 ≈0.7-1 token/字符，base64 ≈0.25 token/字符。
+// 截图已改 JPG（~15KB）且只留 1 张，历史大头是中文文本，300K 字符 ≈ 20-30 万 token 时触发才安全。
+const COMPACT_THRESHOLD = 300 * 1024;
 
 function loadSettings() {
   try {
