@@ -27,10 +27,6 @@ body {
   text-align: center; font-size: 11px; color: #a3968a;
   padding: 4px 0 2px; letter-spacing: .3px;
 }
-#modelBar .mdot {
-  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-  background: #cf4a2c; margin-right: 5px; vertical-align: 1px;
-}
 
 #chat { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
@@ -85,6 +81,7 @@ body {
   flex: 1; border: none; border-radius: 8px; background: #cf4a2c; color: #fff;
   padding: 7px 0; font-weight: 600; cursor: pointer;
 }
+.primaryBtn:disabled { background: #e8b8ac; cursor: default; }
 .secondaryBtn {
   flex: 1; border: 1px solid #cf4a2c; background: #fff7f4; color: #cf4a2c;
   border-radius: 8px; padding: 7px 0; font-weight: 600; cursor: pointer;
@@ -100,3 +97,4 @@ body {
   white-space: pre-wrap; word-break: break-all;
 }
 .sHint { font-size: 10.5px; color: #a1958a; margin-top: 6px; }
+.sHint.warn { color: #9c2a1d; }

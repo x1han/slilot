@@ -680,7 +680,15 @@ function wireUI() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("setTest").addEventListener("click", runSettingsTest);
   $("setCancel").addEventListener("click", () => $("settingsDlg").classList.add("hidden"));
+  ["setUpstream", "setFormat", "setKey", "setModel", "setMaxTokens"].forEach((id) => {
+    $(id).addEventListener("input", updateSaveState);
+    $(id).addEventListener("change", updateSaveState);
+  });
   $("setSave").addEventListener("click", () => {
+    if (!testState.passed || testState.signature !== currentSignature()) {
+      updateSaveState();
+      return;
+    }
     settings.upstreamBase = $("setUpstream").value.trim() || DEFAULT_SETTINGS.upstreamBase;
     settings.apiFormat = $("setFormat").value || "messages";
     settings.apiKey = $("setKey").value.trim();
@@ -716,6 +724,28 @@ function init() {
   }
 }
 
+/* 保存门槛：必须测试且三项全通过（针对当前填写的配置），否则禁止保存 */
+let testState = { passed: false, signature: null };
+
+function currentSignature() {
+  return JSON.stringify([
+    $("setUpstream").value.trim(),
+    $("setFormat").value,
+    $("setKey").value.trim(),
+    $("setModel").value.trim(),
+    $("setMaxTokens").value,
+  ]);
+}
+
+function updateSaveState() {
+  const ok = testState.passed && testState.signature === currentSignature();
+  $("setSave").disabled = !ok;
+  const hint = $("saveHint");
+  hint.textContent = ok ? "测试通过，可以保存。"
+    : (testState.passed ? "配置已修改，请重新测试后再保存。" : "尚未测试：请点「测试」，三项全部通过后才能保存。");
+  hint.classList.toggle("warn", !ok);
+}
+
 function openSettings() {
   $("setTestResult").classList.add("hidden");
   $("setUpstream").value = settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase;
@@ -723,6 +753,7 @@ function openSettings() {
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
   $("setMaxTokens").value = settings.maxTokens;
+  updateSaveState();
   $("settingsDlg").classList.remove("hidden");
 }
 
@@ -821,15 +852,19 @@ async function runSettingsTest() {
   })();
 
   const [r1, r2, r3] = await Promise.allSettled([chatTest, visionTest, imgTest]);
+  const allOk = r1.status === "fulfilled" && r2.status === "fulfilled" && r3.status === "fulfilled";
   const lines = [
     r1.status === "fulfilled" ? r1.value : "❌ 聊天失败：" + ((r1.reason && r1.reason.message) || r1.reason),
     r2.status === "fulfilled" ? r2.value : "❌ 识图失败：" + ((r2.reason && r2.reason.message) || r2.reason),
     r3.status === "fulfilled" ? r3.value : "❌ 生图失败：" + ((r3.reason && r3.reason.message) || r3.reason),
-    "（" + Math.round((Date.now() - t0) / 1000) + " 秒。测试用的是输入框当前值，确认无误后点「保存」）",
   ];
+  if (!allOk) lines.push("⚠ 存在不可用项，不能保存。请更换支持全部三项能力的模型（或检查地址 / Key）后重新测试。");
+  lines.push("（" + Math.round((Date.now() - t0) / 1000) + " 秒。测试用的是输入框当前值）");
   out.textContent = lines.join("\n");
-  log("设置测试: " + lines.slice(0, 2).join(" | ").slice(0, 300));
+  log("设置测试: " + lines.slice(0, 3).join(" | ").slice(0, 400));
+  testState = { passed: allOk, signature: currentSignature() };
   $("setTest").disabled = false;
+  updateSaveState();
 }
 
 function onSend() {
