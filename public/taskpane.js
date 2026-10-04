@@ -407,11 +407,12 @@ async function generateImage({ prompt, aspect_ratio }) {
 /* 截图审查：本地服务经 PowerPoint COM 直接渲染当前打开的演示文稿 */
 let slideShots = null;
 
-async function exportSlidesForReview() {
+async function exportSlidesForReview(signal) {
   const resp = await fetch("/api/export-slides", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
+    signal,
   });
   if (!resp.ok) throw new Error("截图渲染服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
   const data = await resp.json();
@@ -419,8 +420,8 @@ async function exportSlidesForReview() {
   return slideShots;
 }
 
-async function screenshotSlides() {
-  const shots = await exportSlidesForReview();
+async function screenshotSlides(_input, signal) {
+  const shots = await exportSlidesForReview(signal);
   return { ok: true, count: shots.count, note: "逐页截图已生成并缓存（当前打开的演示文稿）。用 review_slide({index}) 查看某页的真实渲染效果。" };
 }
 
@@ -487,7 +488,7 @@ async function fetchBlankBase64() {
   return blankPptxB64;
 }
 
-async function addImage({ imageId, slideIndex, left, top, width, height }) {
+async function addImage({ imageId, slideIndex, left, top, width, height }, signal) {
   const b64 = imageCache[imageId];
   if (!b64) throw new Error("imageId 不存在：只能使用本次会话中 generate_image 返回的 id");
   // 主通道：本地服务 COM 插图（AddPicture 精确指定页与坐标，不依赖宿主 JS 表面）
@@ -503,10 +504,12 @@ async function addImage({ imageId, slideIndex, left, top, width, height }) {
         width: Math.round(Number(width) || 0),
         height: Math.round(Number(height) || 0),
       }),
+      signal,
     });
     if (!resp.ok) throw new Error("COM 插图服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
     return { ok: true, via: "com-addpicture" };
   } catch (e1) {
+    if (signal && signal.aborted) throw e1; // 用户已停止：不要再走降级通道插图
     log("COM 插图失败，改用通用 API（将落入当前显示页）: " + String((e1 && e1.message) || e1));
   }
   // 备用：通用 API（图片会插入当前显示页，无法指定页）
@@ -537,10 +540,10 @@ function showFatal(msg) {
 
 const MUTATING_TOOLS = new Set(["set_shape_text", "style_text", "add_textbox", "add_slides", "delete_shape", "add_image"]);
 
-async function execTool(name, input) {
+async function execTool(name, input, signal) {
   const impl = toolImpl[name];
   if (!impl) throw new Error("未知工具: " + name);
-  const out = await impl(input || {});
+  const out = await impl(input || {}, signal);
   if (MUTATING_TOOLS.has(name) && out && out.ok) docVersion++; // 文档已变更：截图缓存失效
   return out;
 }
@@ -658,7 +661,9 @@ async function runTurn(userText) {
   const myGen = ++runGen;
   const baseLen = messages.length;
   messages.push({ role: "user", content: userText });
-  abortCtrl = new AbortController();
+  // 本次运行独占的控制器：finally 里只清自己那一个，避免旧任务把新任务的控制器置空导致「停止」失效
+  const myCtrl = new AbortController();
+  abortCtrl = myCtrl;
   toolCount = 0;
   compactionAttempts = 0;
   const MAX_ROUNDS = 1000;
@@ -698,7 +703,7 @@ async function runTurn(userText) {
         system: systemPrompt(),
         messages,
         tools: toolDefs(),
-      }, abortCtrl.signal);
+      }, myCtrl.signal);
       if (stale()) return;
       if (!Array.isArray(data.content) || !data.content.length) data.content = [{ type: "text", text: "(空回复)" }];
 
@@ -716,7 +721,8 @@ async function runTurn(userText) {
           setStatus("第 " + (round + 1) + " 轮 · 已执行 " + toolCount + " 个工具 · " + tu.name);
           let resultPayload;
           try {
-            const out = await execTool(tu.name, tu.input);
+            const out = await execTool(tu.name, tu.input, myCtrl.signal);
+            if (stale()) return; // 期间用户点了「新会话」：别把结果写进新会话
             if (out && Array.isArray(out.__images)) {
               // 工具返回截图：以图片块 + 文本说明作为工具结果，供模型视觉审查
               const meta = Object.assign({}, out);
@@ -730,6 +736,7 @@ async function runTurn(userText) {
               resultPayload = JSON.stringify(out);
             }
           } catch (e) {
+            if (stale()) return;
             resultPayload = JSON.stringify({ error: String((e && e.message) || e) });
             addToolChip("✗ " + tu.name + "：" + String((e && e.message) || e).slice(0, 140), true);
             log("工具失败 " + tu.name + ": " + String((e && e.message) || e).slice(0, 300));
@@ -767,7 +774,7 @@ async function runTurn(userText) {
       setBusy(false);
       setStatus(null);
     }
-    abortCtrl = null;
+    if (abortCtrl === myCtrl) abortCtrl = null; // 只清自己的，别把新任务的控制器置空
   }
 }
 
@@ -793,7 +800,10 @@ function detectCaps() {
 /* 事件绑定不依赖宿主初始化，立即执行 */
 function wireUI() {
   $("sendBtn").addEventListener("click", () => {
-    if (busy) { if (abortCtrl) abortCtrl.abort(); return; }
+    if (busy) {
+      if (abortCtrl) { abortCtrl.abort(); setStatus("正在停止…（若正等待 PowerPoint 渲染，需等当前操作返回）"); }
+      return;
+    }
     onSend();
   });
   $("input").addEventListener("keydown", (ev) => {
@@ -806,6 +816,7 @@ function wireUI() {
     messages = [];
     const chat = $("chat");
     while (chat.firstChild) chat.removeChild(chat.firstChild);
+    setBusy(false); // 旧回路已 stale，它的 finally 不会复位，这里必须自己来，否则按钮永远卡在「停止」
     setStatus(null);
   });
   $("settingsBtn").addEventListener("click", openSettings);
