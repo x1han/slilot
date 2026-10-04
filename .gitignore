@@ -14,3 +14,7 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+
+# 按需自托管完整 office.js（本仓库未引用）：
+# npx npmmirror 安装 @microsoft/office-js 后拷贝 dist 到 public/office-js/
+public/office-js/
