@@ -733,7 +733,7 @@ async function runSettingsTest() {
   const model = $("setModel").value.trim() || DEFAULT_SETTINGS.model;
   const out = $("setTestResult");
   out.classList.remove("hidden");
-  out.textContent = "测试中…（生图约需 5-15 秒，两项并行）";
+  out.textContent = "测试中…（聊天 / 识图 / 生图 三项并行，生图约需 5-15 秒）";
   $("setTest").disabled = true;
   const t0 = Date.now();
 
@@ -778,10 +778,52 @@ async function runSettingsTest() {
     return "✅ 生图可用：返回图片正常";
   })();
 
-  const [r1, r2] = await Promise.allSettled([chatTest, imgTest]);
+  const visionTest = (async () => {
+    const imgResp = await fetch("/test-vision.png");
+    if (!imgResp.ok) throw new Error("测试图片加载失败");
+    const blob = await imgResp.blob();
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result));
+      fr.onerror = () => reject(new Error("图片转 base64 失败"));
+      fr.readAsDataURL(blob);
+    });
+    const b64 = dataUrl.split(",")[1] || "";
+    const target = chatTarget(upstream, format);
+    const resp = await fetch("/api/forward", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": "Bearer " + key,
+        "anthropic-version": "2023-06-01",
+        "x-upstream-url": target,
+        "x-api-format": format,
+        "x-forward-auth": "1",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 32,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: b64 } },
+            { type: "text", text: "图中圆形是什么颜色？只回答颜色名称。" },
+          ],
+        }],
+      }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
+    const data = await resp.json();
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    if (/白/.test(text)) return "✅ 识图可用：正确识别出白色圆形";
+    throw new Error("模型回复「" + (text || "(空)").slice(0, 40) + "」——该模型可能不支持图片输入");
+  })();
+
+  const [r1, r2, r3] = await Promise.allSettled([chatTest, visionTest, imgTest]);
   const lines = [
     r1.status === "fulfilled" ? r1.value : "❌ 聊天失败：" + ((r1.reason && r1.reason.message) || r1.reason),
-    r2.status === "fulfilled" ? r2.value : "❌ 生图失败：" + ((r2.reason && r2.reason.message) || r2.reason),
+    r2.status === "fulfilled" ? r2.value : "❌ 识图失败：" + ((r2.reason && r2.reason.message) || r2.reason),
+    r3.status === "fulfilled" ? r3.value : "❌ 生图失败：" + ((r3.reason && r3.reason.message) || r3.reason),
     "（" + Math.round((Date.now() - t0) / 1000) + " 秒。测试用的是输入框当前值，确认无误后点「保存」）",
   ];
   out.textContent = lines.join("\n");

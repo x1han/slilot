@@ -52,9 +52,20 @@ function anthropicToOpenAIChat(body) {
       const blocks = m.content || [];
       for (const tr of blocks.filter((b) => b.type === "tool_result")) {
         msgs.push({ role: "tool", tool_call_id: tr.tool_use_id, content: toolResultText(tr) || "(empty)" });
+        const imgs = Array.isArray(tr.content) ? tr.content.filter((b) => b && b.type === "image") : [];
+        if (imgs.length) {
+          const parts = imgs.map((b) => ({ type: "image_url", image_url: { url: "data:" + ((b.source && b.source.media_type) || "image/png") + ";base64," + ((b.source && b.source.data) || "") } }));
+          parts.push({ type: "text", text: "（上方工具返回的截图）" });
+          msgs.push({ role: "user", content: parts });
+        }
       }
-      const texts = blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-      if (texts) msgs.push({ role: "user", content: texts });
+      const parts = [];
+      for (const b of blocks) {
+        if (b.type === "text") parts.push({ type: "text", text: b.text });
+        else if (b.type === "image") parts.push({ type: "image_url", image_url: { url: "data:" + ((b.source && b.source.media_type) || "image/png") + ";base64," + ((b.source && b.source.data) || "") } });
+      }
+      if (parts.length === 1 && parts[0].type === "text") msgs.push({ role: "user", content: parts[0].text });
+      else if (parts.length) msgs.push({ role: "user", content: parts });
     } else if (m.role === "assistant") {
       if (typeof m.content === "string") { msgs.push({ role: "assistant", content: m.content }); continue; }
       const blocks = m.content || [];
@@ -108,9 +119,20 @@ function anthropicToResponses(body) {
       const blocks = m.content || [];
       for (const tr of blocks.filter((b) => b.type === "tool_result")) {
         input.push({ type: "function_call_output", call_id: tr.tool_use_id, output: toolResultText(tr) || "(empty)" });
+        const imgs = Array.isArray(tr.content) ? tr.content.filter((b) => b && b.type === "image") : [];
+        if (imgs.length) {
+          const parts = imgs.map((b) => ({ type: "input_image", image_url: "data:" + ((b.source && b.source.media_type) || "image/png") + ";base64," + ((b.source && b.source.data) || "") }));
+          parts.push({ type: "input_text", text: "（上方工具返回的截图）" });
+          input.push({ role: "user", content: parts });
+        }
       }
-      const texts = blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-      if (texts) input.push({ role: "user", content: texts });
+      const parts = [];
+      for (const b of blocks) {
+        if (b.type === "text") parts.push({ type: "input_text", text: b.text });
+        else if (b.type === "image") parts.push({ type: "input_image", image_url: "data:" + ((b.source && b.source.media_type) || "image/png") + ";base64," + ((b.source && b.source.data) || "") });
+      }
+      if (parts.length === 1 && parts[0].type === "input_text") input.push({ role: "user", content: parts[0].text });
+      else if (parts.length) input.push({ role: "user", content: parts });
     } else if (m.role === "assistant") {
       if (typeof m.content === "string") { input.push({ role: "assistant", content: m.content }); continue; }
       const blocks = m.content || [];
