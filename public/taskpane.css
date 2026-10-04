@@ -58,7 +58,6 @@ body {
   width: 58px; border: none; border-radius: 8px; background: #cf4a2c; color: #fff;
   font-weight: 600; cursor: pointer;
 }
-#sendBtn:disabled { background: #e8b8ac; cursor: default; }
 
 #settingsDlg {
   position: fixed; inset: 0; background: rgba(38,33,29,.4);

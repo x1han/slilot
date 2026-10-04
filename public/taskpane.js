@@ -25,6 +25,8 @@ let messages = [];           // Anthropic 格式消息数组
 let busy = false;
 let abortCtrl = null;
 let toolCount = 0;           // 当前任务已执行的工具数（状态栏隐式进度）
+let runGen = 0;              // 会话代号：新会话/中止时递增，旧回路据此静默退出
+let docVersion = 0;          // 文档修改版本号：截图缓存据此失效
 
 function loadSettings() {
   try {
@@ -39,9 +41,6 @@ function saveSettings() {
 
 /* ---------------- UI 基础 ---------------- */
 const $ = (id) => document.getElementById(id);
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
 function addMsg(kind, text) {
   const div = document.createElement("div");
   div.className = "msg " + kind;
@@ -122,23 +121,21 @@ function systemPrompt() {
     "- 画布为 " + canvas.w + " x " + canvas.h + " 点(pt)，原点在左上角，x 向右、y 向下，排版勿越界。",
     "- 文字要适合 PPT：短句、要点式，不要长段落。",
     "- 并行调用：相互独立的操作（批量文本框、多张已生成图片的插入）尽量在一条消息里同时发出多个工具调用。",
-    "- 宿主支持的 API 集: " + (capSets.join(", ") || "检测中") + "。不要调用不可用工具。",
+    "- 宿主 JS 表面: " + (capSets.join(", ") || "检测中") + "。不要调用表面之外的能力。",
     "- 完成或出错都如实说明；出错先重试一次，仍失败就换方案或如实报告。",
   ].join("\n");
 }
 
 /* ---------------- 工具定义 ---------------- */
 function toolDefs() {
-  const has = (set) => capSets.includes(set);
+  const has = (name) => capSets.includes(name);
   const defs = [
     { name: "get_presentation_overview", description: "获取演示文稿概览：页数、画布尺寸、每页形状数量与文本预览", input_schema: { type: "object", properties: {}, required: [] } },
     { name: "read_slide", description: "读取某一页所有形状的详细信息（类型、位置、尺寸、完整文本）", input_schema: { type: "object", properties: { index: { type: "integer", description: "页索引, 0-based" } }, required: ["index"] } },
+    { name: "set_shape_text", description: "替换某页某形状的全部文本", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, shapeIndex: { type: "integer" }, text: { type: "string" } }, required: ["slideIndex", "shapeIndex", "text"] } },
+    { name: "style_text", description: "设置某形状文本样式（字号/加粗/颜色）", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, shapeIndex: { type: "integer" }, fontSize: { type: "number", description: "字号(pt)" }, bold: { type: "boolean" }, colorHex: { type: "string", description: "#RRGGBB" } }, required: ["slideIndex", "shapeIndex"] } },
   ];
-  if (has("PowerPointApi 1.3")) {
-    defs.push({ name: "set_shape_text", description: "替换某页某形状的全部文本", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, shapeIndex: { type: "integer" }, text: { type: "string" } }, required: ["slideIndex", "shapeIndex", "text"] } });
-    defs.push({ name: "style_text", description: "设置某形状文本样式（字号/加粗/颜色）", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, shapeIndex: { type: "integer" }, fontSize: { type: "number", description: "字号(pt)" }, bold: { type: "boolean" }, colorHex: { type: "string", description: "#RRGGBB" } }, required: ["slideIndex", "shapeIndex"] } });
-  }
-  if (has("PowerPointApi 1.4")) {
+  if (has("addTextBox")) {
     defs.push({ name: "add_textbox", description: "在某一页插入文本框", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, text: { type: "string" }, left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" }, fontSize: { type: "number" }, bold: { type: "boolean" }, colorHex: { type: "string" } }, required: ["slideIndex", "text", "left", "top", "width", "height"] } });
     defs.push({ name: "generate_image", description: "调用图像生成模型生成一张图片（生成后返回 imageId，需再用 add_image 插入幻灯片）", input_schema: { type: "object", properties: { prompt: { type: "string", description: "图片内容描述，具体、可视化" }, aspect_ratio: { type: "string", description: "宽高比，如 1:1、16:9、4:3，默认 1:1" } }, required: ["prompt"] } });
     defs.push({ name: "add_image", description: "把 generate_image 生成的图片插入某一页（用其返回的 imageId）", input_schema: { type: "object", properties: { imageId: { type: "string" }, slideIndex: { type: "integer" }, left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" }, description: "尺寸单位为 pt，画布 " + canvas.w + "x" + canvas.h }, required: ["imageId", "slideIndex", "left", "top", "width", "height"] } });
@@ -154,7 +151,7 @@ function toolDefs() {
 function pt(n) { return Math.round(Number(n) * 10) / 10; }
 
 async function getShapesOfSlide(ctx, slideIndex) {
-  const slide = ctx.presentation.slides.getItemAt(slideIndex);
+  const slide = ctx.presentation.slides.getItemAt(Math.max(0, Math.floor(Number(slideIndex) || 0)));
   const shapes = slide.shapes;
   shapes.load("items");
   await ctx.sync();
@@ -203,7 +200,7 @@ const toolImpl = {
       const slideInfos = [];
       for (let i = 0; i < count; i++) {
         const shapes = await getShapesOfSlide(ctx, i);
-        const metas = shapes.items.map((sh) => { sh.load("id,name,type"); return sh; });
+        shapes.items.forEach((sh) => { try { sh.load("id,name,type"); } catch (e) {} });
         try { await ctx.sync(); } catch (e) {}
         const texts = await loadShapeTexts(ctx, shapes.items);
         const textsShort = texts.map((t) => (t == null ? null : String(t).slice(0, 120)));
@@ -261,11 +258,9 @@ const toolImpl = {
   },
 
   async add_textbox({ slideIndex, text, left, top, width, height, fontSize, bold, colorHex }) {
-    if (!Office.context.requirements.isSetSupported("PowerPointApi", "1.4")) {
-      throw new Error("宿主 PowerPointApi < 1.4，无法插入文本框");
-    }
     return await PowerPoint.run(async (ctx) => {
       const shapes = await getShapesOfSlide(ctx, Number(slideIndex));
+      if (typeof shapes.addTextBox !== "function") throw new Error("宿主 JS 表面无 addTextBox，无法插入文本框");
       const tb = shapes.addTextBox(String(text || ""), {
         left: Number(left), top: Number(top), width: Number(width), height: Number(height),
       });
@@ -282,42 +277,32 @@ const toolImpl = {
     return await PowerPoint.run(async (ctx) => {
       const slides = ctx.presentation.slides;
       const n = Math.max(1, Math.min(20, Number(count) || 1));
-      const start = afterIndex == null ? null : Number(afterIndex);
       slides.load("items/id");
       await ctx.sync();
-      const beforeIds = slides.items.map((s) => String(safe(() => s.id)));
-      let usedInsert = typeof slides.add !== "function";
-
-      if (!usedInsert) {
-        // 主通道：slides.add（PowerPointApi 1.5+）
-        try {
-          for (let k = 0; k < n; k++) {
-            const s = start == null ? slides.add() : slides.add({ index: start + 1 + k });
-            s.load("id");
-            await ctx.sync();
-          }
-        } catch (e) {
-          log("slides.add 失败，改用 insertSlidesFromBase64: " + String((e && e.message) || e));
-          usedInsert = true;
-        }
+      const origIds = slides.items.map((s) => String(safe(() => s.id)));
+      if (!origIds.length) throw new Error("当前文档 0 页，无法定位插入点（请先手动新建一页）");
+      const start = afterIndex == null ? origIds.length - 1 : Math.min(Math.max(0, Number(afterIndex)), origIds.length - 1);
+      const tpl = await fetchBlankBase64();
+      let ids = origIds.slice();
+      let targetId = ids[start];
+      for (let k = 0; k < n; k++) {
+        // 链式插入：每次插到上一张新页之后，保证 N 张新页相邻且顺序正确
+        ctx.presentation.insertSlidesFromBase64(tpl, { targetSlideId: targetId });
+        await ctx.sync();
+        slides.load("items/id");
+        await ctx.sync();
+        const newIds = slides.items.map((s) => String(safe(() => s.id))).filter((id) => !ids.includes(id));
+        if (!newIds.length) throw new Error("插页未生效（宿主未返回新页），已插入 " + k + "/" + n + " 页");
+        ids = slides.items.map((s) => String(safe(() => s.id)));
+        targetId = newIds[0];
       }
-      if (usedInsert) {
-        // 备用通道：插入空白模板页（insertSlidesFromBase64，PowerPointApi 1.3 起可用）
-        const tpl = await fetchBlankBase64();
-        for (let k = 0; k < n; k++) {
-          const targetId = start == null ? beforeIds[beforeIds.length - 1] : beforeIds[Math.min(start + k, beforeIds.length - 1)];
-          ctx.presentation.insertSlidesFromBase64(tpl, { targetSlideId: targetId });
-          await ctx.sync();
-        }
-      }
-      slides.load("items/id");
-      await ctx.sync();
       const afterIds = slides.items.map((s) => String(safe(() => s.id)));
       const newIndices = [];
       for (let i = 0; i < afterIds.length; i++) {
-        if (beforeIds.indexOf(afterIds[i]) === -1) newIndices.push(i);
+        if (origIds.indexOf(afterIds[i]) === -1) newIndices.push(i);
       }
-      return { ok: true, method: usedInsert ? "insertSlidesFromBase64" : "slides.add", added: newIndices.length || n, newSlideIndices: newIndices };
+      if (newIndices.length < n) throw new Error("插页数量不足（请求 " + n + " 页，实际 " + newIndices.length + " 页）");
+      return { ok: true, method: "insertSlidesFromBase64", added: newIndices.length, newSlideIndices: newIndices };
     });
   },
 
@@ -331,6 +316,8 @@ const toolImpl = {
     try {
       return await PowerPoint.run(tryDelete);
     } catch (e) {
+      const code = String((e && e.code) || "");
+      if (code && code !== "GeneralException") throw e; // 越界等非占位符问题原样上报
       // 占位符等形状宿主拒绝删除（GeneralException）：降级为"移出画布 + 清空文字"
       log("delete_shape 降级（可能是版式占位符）: " + String((e && e.message) || e));
       return await PowerPoint.run(async (ctx) => {
@@ -405,7 +392,7 @@ async function exportSlidesForReview() {
   });
   if (!resp.ok) throw new Error("截图渲染服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
   const data = await resp.json();
-  slideShots = { count: data.count, images: data.images };
+  slideShots = { count: data.count, images: data.images, docVersion };
   return slideShots;
 }
 
@@ -415,7 +402,7 @@ async function screenshotSlides() {
 }
 
 async function reviewSlide({ index }) {
-  if (!slideShots) await exportSlidesForReview();
+  if (!slideShots || slideShots.docVersion !== docVersion) await exportSlidesForReview();
   const i = Number(index);
   const img = (slideShots.images || []).find((x) => x.index === i);
   if (!img) throw new Error("该页截图不存在（index 超界或截图过期，请重新 screenshot_slides）");
@@ -499,21 +486,8 @@ async function addImage({ imageId, slideIndex, left, top, width, height }) {
     await setSelectedImage(b64, pos);
     return { ok: true, via: "setSelectedDataAsync", jumpFailed, note: jumpFailed ? "未能跳页，图片插在了当前显示页" : undefined };
   } catch (e1) {
-    log("setSelectedDataAsync 插图失败，改用富 API addImage: " + String((e1 && e1.message) || e1));
+    throw new Error("插图失败（setSelectedDataAsync: " + String((e1 && e1.message) || e1) + "）。请检查目标页与坐标后重试");
   }
-  // 备用：富 API（需要 PowerPointApi 1.4 且宿主 JS 完整）
-  return await PowerPoint.run(async (ctx) => {
-    const shapes = await getShapesOfSlide(ctx, Number(slideIndex));
-    const opts = {};
-    if (left != null) opts.left = Number(left);
-    if (top != null) opts.top = Number(top);
-    if (width != null) opts.width = Number(width);
-    if (height != null) opts.height = Number(height);
-    const sh = shapes.addImage(b64, opts);
-    sh.load("id");
-    await ctx.sync();
-    return { ok: true, via: "addImage", shapeId: safe(() => sh.id) };
-  });
 }
 
 function log(msg) {
@@ -526,10 +500,14 @@ function showFatal(msg) {
   log("致命: " + msg);
 }
 
+const MUTATING_TOOLS = new Set(["set_shape_text", "style_text", "add_textbox", "add_slides", "delete_shape", "add_image"]);
+
 async function execTool(name, input) {
   const impl = toolImpl[name];
   if (!impl) throw new Error("未知工具: " + name);
-  return await impl(input || {});
+  const out = await impl(input || {});
+  if (MUTATING_TOOLS.has(name) && out && out.ok) docVersion++; // 文档已变更：截图缓存失效
+  return out;
 }
 
 /* ---------------- 对话回路 ---------------- */
@@ -564,13 +542,55 @@ async function callApi(body, signal) {
   return await resp.json();
 }
 
+/* 历史修剪：①只保留最近 2 张截图，更早的图片块替换为占位文本（token 防爆）；
+ * ②非最新 assistant 消息剔除 thinking 块（工具循环续传不需要） */
+function pruneHistory() {
+  const lastAssistant = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "assistant") return i;
+    return -1;
+  })();
+  const imgRefs = [];
+  messages.forEach((m, mi) => {
+    if (!Array.isArray(m.content)) return;
+    m.content.forEach((b, bi) => {
+      if (b.type === "image") imgRefs.push({ mi, bi });
+      if (b.type === "tool_result" && Array.isArray(b.content)) {
+        b.content.forEach((cb, ci) => { if (cb && cb.type === "image") imgRefs.push({ mi, bi, ci }); });
+      }
+    });
+  });
+  const keep = new Set(imgRefs.slice(-2).map((r) => r.mi + "|" + r.bi + "|" + (r.ci == null ? "" : r.ci)));
+  imgRefs.forEach((r) => {
+    const key = r.mi + "|" + r.bi + "|" + (r.ci == null ? "" : r.ci);
+    if (keep.has(key)) return;
+    const ph = { type: "text", text: "[历史截图已省略，需要时重新 screenshot_slides + review_slide]" };
+    if (r.ci == null) messages[r.mi].content[r.bi] = ph;
+    else messages[r.mi].content[r.bi].content[r.ci] = ph;
+  });
+  messages.forEach((m, mi) => {
+    if (m.role !== "assistant" || !Array.isArray(m.content) || mi === lastAssistant) return;
+    if (m.content.some((b) => b.type === "thinking")) m.content = m.content.filter((b) => b.type !== "thinking");
+  });
+}
+
 async function runTurn(userText) {
+  const myGen = ++runGen;
+  const baseLen = messages.length;
   messages.push({ role: "user", content: userText });
   abortCtrl = new AbortController();
   toolCount = 0;
   const MAX_ROUNDS = 1000;
+  const stale = () => myGen !== runGen;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (stale()) return;
+      // 体积熔断：历史过大时停止（约 3MB）
+      const histSize = JSON.stringify(messages).length;
+      if (histSize > 3000000) {
+        addMsg("assistant", "⚠ 对话历史体积已达 " + Math.round(histSize / 10000) / 100 + " MB，继续会超出模型上下文。请点「新会话」开始新任务。");
+        return;
+      }
+      pruneHistory();
       setStatus("第 " + (round + 1) + " 轮 · 思考中…");
       const data = await callApi({
         model: settings.model,
@@ -579,15 +599,19 @@ async function runTurn(userText) {
         messages,
         tools: toolDefs(),
       }, abortCtrl.signal);
+      if (stale()) return;
+      if (!Array.isArray(data.content) || !data.content.length) data.content = [{ type: "text", text: "(空回复)" }];
 
       messages.push({ role: "assistant", content: data.content });
       const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+      const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
 
-      if (data.stop_reason === "tool_use") {
+      if (toolUses.length) {
+        // 以内容为准：即便 stop_reason 异常，只要有完整 tool_use 就继续执行
         if (text) addMsg("assistant", text);
-        const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
         const results = [];
         for (const tu of toolUses) {
+          if (stale()) return;
           toolCount++;
           setStatus("第 " + (round + 1) + " 轮 · 已执行 " + toolCount + " 个工具 · " + tu.name);
           let resultPayload;
@@ -612,6 +636,7 @@ async function runTurn(userText) {
           }
           results.push({ type: "tool_result", tool_use_id: tu.id, content: resultPayload });
         }
+        if (stale()) return;
         messages.push({ role: "user", content: results });
         continue;
       }
@@ -624,44 +649,43 @@ async function runTurn(userText) {
       addMsg("assistant", finalText);
       return;
     }
-    addMsg("assistant", "⚠ 已连续执行 " + MAX_ROUNDS + " 轮工具，自动暂停以防空转。回复「继续」我会接着未完成的部分继续做。");
+    addMsg("assistant", "⚠ 已连续执行 " + MAX_ROUNDS + " 轮工具，自动暂停。回复「继续」我会接着未完成的部分继续做。");
   } catch (e) {
+    if (stale()) return;
+    // 协议修复：历史末尾若悬空 user（含未应答的 tool_result），补一条 assistant 收尾，避免下次请求 400
+    const last = messages[messages.length - 1];
+    if (last && last.role === "user") {
+      messages.push({ role: "assistant", content: [{ type: "text", text: "[已中断/出错]" }] });
+    }
     if (e && e.name === "AbortError") {
       addMsg("assistant", "（已停止）");
     } else {
       addMsg("error", "出错了: " + String((e && e.message) || e) + "\n\n常见原因：本地服务没在运行（双击 start-addin.bat）、Key 无效、或网络问题。");
     }
   } finally {
-    setBusy(false);
-    setStatus(null);
+    if (!stale()) {
+      setBusy(false);
+      setStatus(null);
+    }
     abortCtrl = null;
   }
 }
 
 /* ---------------- 初始化 ---------------- */
 function detectCaps() {
+  // 宿主虚报 isSetSupported（1.1-1.8 全报支持），改用原型表面探测真实可用能力
   try {
-    const reqs = Office.context && Office.context.requirements;
-    if (!reqs) throw new Error("无宿主能力上下文（需在 PowerPoint 中打开）");
-    const sets = [];
-    ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8"].forEach((v) => {
-      if (reqs.isSetSupported("PowerPointApi", v)) sets.push("PowerPointApi " + v);
+    const shapeProto = PowerPoint.ShapeCollection.prototype;
+    const flags = [];
+    ["addTextBox", "addTable", "addLine", "addGeometricShape", "addGroup"].forEach((key) => {
+      if (typeof shapeProto[key] === "function") flags.push(key);
     });
-    capSets = sets;
-    log("能力检测: " + (sets.join(", ") || "基本"));
-    // 黑匣子：记录实际可用的 JS 表面（方法原型），用于诊断"能力集已报但方法缺失"类问题
-    try {
-      const shapeKeys = Object.getOwnPropertyNames(PowerPoint.ShapeCollection.prototype).filter((k) => k[0] !== "_");
-      log("Surface ShapeCollection: " + shapeKeys.join(","));
-    } catch (e) {
-      log("Surface 探测失败: " + String((e && e.message) || e));
-    }
-    try {
-      const res = performance.getEntriesByType("resource").filter((r) => /\.js/i.test(r.name)).map((r) => r.name.split("/").pop());
-      log("JS资源: " + res.join(", "));
-    } catch (e) {}
+    flags.push("insertSlidesFromBase64"); // presentation 级，实测可用
+    capSets = flags;
+    log("Surface: " + flags.join(", "));
   } catch (e) {
-    log("能力检测失败: " + String((e && e.message) || e));
+    capSets = [];
+    log("Surface 探测失败: " + String((e && e.message) || e));
   }
   $("modelName").textContent = settings.model || DEFAULT_SETTINGS.model;
 }
@@ -677,6 +701,7 @@ function wireUI() {
     if (ev.key === "Escape" && busy && abortCtrl) abortCtrl.abort();
   });
   $("newChatBtn").addEventListener("click", () => {
+    runGen++; // 使旧回路静默退出，防止孤儿 tool_result 毒化新会话
     if (abortCtrl) abortCtrl.abort();
     messages = [];
     const chat = $("chat");
@@ -721,6 +746,16 @@ function init() {
           $("modelName").textContent = "⚠ 请在 PowerPoint 中打开此面板";
         }
         detectCaps();
+        if (host === "PowerPoint") {
+          // 提前探测画布尺寸，避免首轮规划用错画布
+          PowerPoint.run(async (ctx) => {
+            ctx.presentation.load("slideWidth,slideHeight");
+            await ctx.sync();
+            canvas.w = ctx.presentation.slideWidth;
+            canvas.h = ctx.presentation.slideHeight;
+            log("画布: " + canvas.w + "x" + canvas.h);
+          }).catch(() => {});
+        }
       } catch (e) {
         showFatal("onReady 处理失败: " + String((e && e.message) || e));
       }
@@ -754,6 +789,7 @@ function updateSaveState() {
 
 function openSettings() {
   $("setTestResult").classList.add("hidden");
+  $("setTest").disabled = false; // 上次测试若因超时卡住，重开对话框时恢复可用
   $("setUpstream").value = settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase;
   $("setFormat").value = settings.apiFormat || "messages";
   $("setKey").value = settings.apiKey;
@@ -768,10 +804,13 @@ async function runSettingsTest() {
   const format = $("setFormat").value || "messages";
   const key = $("setKey").value.trim();
   const model = $("setModel").value.trim() || DEFAULT_SETTINGS.model;
+  const testedSig = currentSignature(); // 记录被测配置：完成时回填，避免竞态绕过保存门槛
   const out = $("setTestResult");
   out.classList.remove("hidden");
   out.textContent = "测试中…（聊天 / 识图 / 生图 三项并行，生图约需 5-15 秒）";
   $("setTest").disabled = true;
+  testState = { passed: false, signature: null };
+  updateSaveState();
   const t0 = Date.now();
 
   const chatTest = (async () => {
@@ -786,6 +825,7 @@ async function runSettingsTest() {
         "x-api-format": format,
         "x-forward-auth": "1",
       },
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
     });
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
@@ -803,6 +843,7 @@ async function runSettingsTest() {
         "x-upstream-url": settings.imageApiUrl || DEFAULT_SETTINGS.imageApiUrl,
         "x-forward-auth": "1",
       },
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
         model: settings.imageModel || "image-01",
         prompt: "连通测试：一枚简单的橙色五角星，扁平风格",
@@ -837,6 +878,7 @@ async function runSettingsTest() {
         "x-api-format": format,
         "x-forward-auth": "1",
       },
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
         model,
         max_tokens: 512,
@@ -852,7 +894,7 @@ async function runSettingsTest() {
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
     const data = await resp.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到/.test(text);
+    const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到/.test(text) && /圆|circle/i.test(text);
     if (seesImage) return "✅ 识图可用：模型正确识别了截图内容（" + (text || "").slice(0, 50) + "）";
     throw new Error("模型回复「" + (text || "(空)").slice(0, 60) + "」——该模型可能不支持图片输入，请换支持视觉的模型");
   })();

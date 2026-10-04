@@ -216,6 +216,7 @@ async function handleForward(req, res) {
     method,
     headers,
     body: bodyBuffer || undefined,
+    signal: AbortSignal.timeout(300000), // 上游挂起时 5 分钟自动放弃，避免请求永久悬挂
   });
   // 响应翻译（仅成功且非 messages 格式；错误体原样透传便于排错）
   if (format !== "messages" && upstream.ok) {
@@ -234,7 +235,11 @@ async function handleForward(req, res) {
     "content-type": upstream.headers.get("content-type") || "application/octet-stream",
   });
   if (upstream.body) {
-    Readable.fromWeb(upstream.body).pipe(res);
+    // 上游断流 / 客户端取消时不允许拖垮整个服务
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.on("error", () => { try { res.destroy(); } catch (e) {} });
+    res.on("error", () => { try { nodeStream.destroy(); } catch (e) {} });
+    nodeStream.pipe(res);
   } else {
     res.end();
   }
@@ -249,7 +254,7 @@ function runExportScript(outDir) {
     execFile(
       "powershell.exe",
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-OutDir", outDir],
-      { timeout: 120000 },
+      { timeout: 120000, windowsHide: true },
       (err, stdout, stderr) => {
         if (err) {
           return reject(new Error("COM 渲染失败: " + String(err.message || err).slice(0, 200) + " " + String(stdout || "") + String(stderr || "").slice(0, 300)));
@@ -264,8 +269,11 @@ async function doExportSlides() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slilot-export-"));
   try {
     await runExportScript(tmp);
-    const manifestTxt = fs.readFileSync(path.join(tmp, "manifest.txt"), "utf8");
-    const files = manifestTxt.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    // 不依赖 PS 侧 manifest（避免编码交接问题），直接按文件名枚举排序
+    const files = fs.readdirSync(tmp)
+      .filter((f) => /^slide-\d+\.png$/i.test(f))
+      .sort((a, b) => (parseInt(a.match(/\d+/), 10) - parseInt(b.match(/\d+/), 10)))
+      .map((f) => path.join(tmp, f));
     const images = files.map((p, i) => ({ index: i, base64: fs.readFileSync(p).toString("base64") }));
     return { ok: true, count: images.length, images };
   } finally {
@@ -273,9 +281,16 @@ async function doExportSlides() {
   }
 }
 
+let exportPending = 0;
+
 async function handleExportSlides(req, res) {
+  if (exportPending >= 2) {
+    res.writeHead(429, { "content-type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ error: "已有截图任务在执行，请稍后再试" }));
+  }
+  exportPending++;
   // 串行执行，避免多个 COM 实例互相干扰
-  const run = exportLock.then(() => doExportSlides());
+  const run = exportLock.then(() => doExportSlides()).finally(() => { exportPending--; });
   exportLock = run.catch(() => {});
   const out = await run;
   res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
@@ -286,7 +301,8 @@ function handleStatic(req, res, pathname) {
   let p = decodeURIComponent(pathname);
   if (p === "/") p = "/taskpane.html";
   const file = path.normalize(path.join(ROOT, p));
-  if (!file.startsWith(ROOT)) {
+  const rel = path.relative(ROOT, file);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
     res.writeHead(403);
     return res.end("forbidden");
   }
@@ -303,6 +319,12 @@ function handleStatic(req, res, pathname) {
 const handler = async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
+    // 跨站防护：浏览器发起的跨源请求一律 403（同源面板与本机无 Origin 的工具调用不受影响）
+    const origin = req.headers.origin;
+    if (origin && origin !== "https://localhost:3010") {
+      res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+      return res.end(JSON.stringify({ error: "cross-origin forbidden" }));
+    }
     if (url.pathname === "/api/forward") {
       // 通用转发：目标地址由请求头 x-upstream-url 指定（仅允许 https）
       await handleForward(req, res);
@@ -353,3 +375,13 @@ server.on("error", (e) => {
   console.error("[Slilot] 启动失败:", e.message);
   process.exit(1);
 });
+
+// 兜底：任何未捕获异常只记日志，不允许拖垮本地服务（面板的所有请求都依赖它）
+function serverLog(line) {
+  try {
+    fs.mkdirSync(path.join(__dirname, "logs"), { recursive: true });
+    fs.appendFileSync(path.join(__dirname, "logs", "server.log"), new Date().toISOString() + "  " + line + "\n");
+  } catch (e) {}
+}
+process.on("uncaughtException", (e) => serverLog("uncaughtException: " + String((e && e.stack) || e)));
+process.on("unhandledRejection", (e) => serverLog("unhandledRejection: " + String((e && e.stack) || e)));
