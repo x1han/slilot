@@ -27,6 +27,8 @@ let abortCtrl = null;
 let toolCount = 0;           // 当前任务已执行的工具数（状态栏隐式进度）
 let runGen = 0;              // 会话代号：新会话/中止时递增，旧回路据此静默退出
 let docVersion = 0;          // 文档修改版本号：截图缓存据此失效
+let compactionAttempts = 0;  // 摘要压缩尝试次数（每次运行最多 2 次）
+const COMPACT_THRESHOLD = 328 * 1024; // ≈328KB，超过即触发摘要压缩
 
 function loadSettings() {
   try {
@@ -587,24 +589,89 @@ function pruneHistory() {
   });
 }
 
+/* 摘要压缩：历史超过阈值时，把最早的整段工具明细折叠成交接摘要。
+ * 折叠范围 [0..k)：k 取倒数 4 条之前最大的 assistant 索引（range 以 user 结尾），
+ * 替换为一条 user 摘要消息后与 messages[k]（assistant）保持角色交替合法。 */
+function stripForSummary(m) {
+  let content = m.content;
+  if (Array.isArray(content)) {
+    content = content.map((b) => {
+      if (b.type === "image") return { type: "text", text: "[截图]" };
+      if (b.type === "tool_result" && Array.isArray(b.content)) {
+        return Object.assign({}, b, { content: b.content.map((cb) => (cb && cb.type === "image" ? { type: "text", text: "[截图]" } : cb)) });
+      }
+      return b;
+    });
+  } else if (typeof content === "string" && content.length > 20000) {
+    content = content.slice(0, 20000) + "…[截断]";
+  }
+  return { role: m.role, content };
+}
+
+async function compactHistoryIfNeeded() {
+  let k = -1;
+  for (let i = messages.length - 1; i >= 4; i--) {
+    if (messages[i].role === "assistant") { k = i; break; }
+  }
+  if (k < 2) return false; // 可折叠内容不足
+  const payload = [];
+  for (let i = 0; i < k; i++) payload.push(stripForSummary(messages[i]));
+  const data = await callApi({
+    model: settings.model,
+    max_tokens: 2000,
+    messages: [{
+      role: "user",
+      content: "以下是一次 PPT 生成任务的对话与工具执行记录（JSON，超长处已截断）。请压缩成一份交接摘要，供后续对话继续任务使用。要求：\n" +
+        "1. 以「此前已完成：」开头，按页列出已完成的页面与关键操作；\n" +
+        "2. 必须保留原始任务中的关键数据（面积、台数、品牌、楼层、负责人等），后续页面还要用到；\n" +
+        "3. 列出尚未完成的事项；\n" +
+        "4. 全文不超过 400 字，用中文。\n\n记录：\n" + JSON.stringify(payload).slice(0, 120000),
+    }],
+  });
+  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  if (!text) throw new Error("压缩摘要为空");
+  const compacted = { role: "user", content: "[上下文压缩] 原始任务与此前执行要点：\n" + text + "\n\n（更早的工具明细已折叠。用户后续消息见下。）" };
+  messages = [compacted].concat(messages.slice(k));
+  return true;
+}
+
 async function runTurn(userText) {
   const myGen = ++runGen;
   const baseLen = messages.length;
   messages.push({ role: "user", content: userText });
   abortCtrl = new AbortController();
   toolCount = 0;
+  compactionAttempts = 0;
   const MAX_ROUNDS = 1000;
   const stale = () => myGen !== runGen;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       if (stale()) return;
-      // 体积熔断：历史过大时停止（约 3MB）
+      pruneHistory();
+      // 摘要压缩：历史超过阈值时，把最早的工具明细折叠成交接摘要（每次运行最多尝试 2 次）
       const histSize = JSON.stringify(messages).length;
-      if (histSize > 3000000) {
-        addMsg("assistant", "⚠ 对话历史体积已达 " + Math.round(histSize / 10000) / 100 + " MB，继续会超出模型上下文。请点「新会话」开始新任务。");
+      if (histSize > COMPACT_THRESHOLD && compactionAttempts < 2) {
+        compactionAttempts++;
+        setStatus("上下文压缩中…");
+        try {
+          const before = histSize;
+          const folded = await compactHistoryIfNeeded();
+          if (stale()) return;
+          if (folded) {
+            const after = JSON.stringify(messages).length;
+            log("上下文压缩: " + before + " -> " + after + " 字符");
+            addMsg("assistant", "🧹 历史已压缩：最早的工具明细折叠为交接摘要（任务连续性不受影响）。");
+          }
+        } catch (e) {
+          log("上下文压缩失败（跳过）: " + String((e && e.message) || e));
+        }
+      }
+      // 体积熔断：压缩后仍过大（约 3MB）才停止
+      const afterSize = JSON.stringify(messages).length;
+      if (afterSize > 3000000) {
+        addMsg("assistant", "⚠ 对话历史体积已达 " + Math.round(afterSize / 10000) / 100 + " MB，继续会超出模型上下文。请点「新会话」开始新任务。");
         return;
       }
-      pruneHistory();
       setStatus("第 " + (round + 1) + " 轮 · 思考中…");
       const data = await callApi({
         model: settings.model,
