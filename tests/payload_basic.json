@@ -1,0 +1,7 @@
+{
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tokens": 200,
+  "messages": [
+    { "role": "user", "content": "只回复四个字：测试成功" }
+  ]
+}

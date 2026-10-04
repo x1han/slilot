@@ -1,0 +1,15 @@
+{
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tokens": 2000,
+  "system": "你是测试助手。用户要求查询时间时，必须调用 get_time 工具。",
+  "messages": [
+    { "role": "user", "content": "请调用 get_time 工具查询现在的时间" }
+  ],
+  "tools": [
+    {
+      "name": "get_time",
+      "description": "获取当前时间",
+      "input_schema": { "type": "object", "properties": {}, "required": [] }
+    }
+  ]
+}

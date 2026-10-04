@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>AI PPT 助手</title>
+  <script>
+    // 黑匣子：页面任何 JS 错误回传本地服务器，便于远程诊断
+    (function () {
+      function report(msg) {
+        try {
+          fetch("/client-log", { method: "POST", headers: { "content-type": "text/plain" }, body: String(msg) });
+        } catch (e) {}
+      }
+      window.addEventListener("error", function (e) {
+        report("JS错误: " + e.message + " @ " + (e.filename || "?") + ":" + (e.lineno || "?"));
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        report("Promise拒绝: " + ((e.reason && e.reason.message) || e.reason));
+      });
+    })();
+  </script>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"
+          onerror="var s=document.createElement('script');s.src='office.js';document.head.appendChild(s);"></script>
+  <script src="taskpane.js" defer></script>
+  <link rel="stylesheet" href="taskpane.css"/>
+</head>
+<body>
+  <div id="app">
+    <div id="hdr">
+      <div id="hdrTitle">
+        <span class="dot"></span> AI PPT 助手
+      </div>
+      <div id="hdrBtns">
+        <button id="newChatBtn" class="ghostBtn" title="清空对话">新会话</button>
+        <button id="settingsBtn" class="ghostBtn" title="设置">⚙</button>
+      </div>
+    </div>
+
+    <div id="capBadge">正在检测宿主能力…</div>
+
+    <div id="chat">
+      <div class="msg assistant welcome">
+        你好！我可以直接读写你当前打开的这份演示文稿。试试下面的例子，或直接描述需求：
+        <div id="chips">
+          <button class="chip">总结这份 PPT 每一页的内容</button>
+          <button class="chip">在第 1 页后新增一页「产品路线图」，包含 3 个要点</button>
+          <button class="chip">把每一页的标题都改成橙色加粗</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="statusbar" class="hidden"></div>
+
+    <div id="inputBar">
+      <textarea id="input" rows="2" placeholder="描述你想生成或修改的内容…（Enter 发送）"></textarea>
+      <button id="sendBtn">发送</button>
+    </div>
+
+    <div id="settingsDlg" class="hidden">
+      <div id="settingsCard">
+        <div class="sTitle">设置</div>
+        <label>上游 Base（与下方格式拼接成完整地址）</label>
+        <input id="setUpstream" type="text"/>
+        <label>接口格式</label>
+        <select id="setFormat">
+          <option value="messages">Anthropic — /v1/messages</option>
+          <option value="responses">OpenAI — /v1/responses</option>
+          <option value="chat">OpenAI — /v1/chat/completions</option>
+        </select>
+        <label>API Key</label>
+        <input id="setKey" type="password"/>
+        <label>模型</label>
+        <input id="setModel" type="text"/>
+        <label>max_tokens</label>
+        <input id="setMaxTokens" type="number" min="1024" max="65536"/>
+        <div class="sBtns">
+          <button id="setTest" class="secondaryBtn">测试</button>
+          <button id="setSave" class="primaryBtn">保存</button>
+          <button id="setCancel" class="cancelBtn">取消</button>
+        </div>
+        <div id="setTestResult" class="testResult hidden"></div>
+        <div class="sHint">Key 只保存在本机浏览器存储中，随请求经本地代理转发。</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
