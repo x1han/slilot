@@ -84,13 +84,13 @@ function systemPrompt() {
     "- 产出页面级规划：每页的标题、核心内容（要点/表格数据）、配图需求（写好具体生图提示词）、版式布局（各元素的坐标与大小）。",
     "- 用几行向用户展示规划（每页一行），然后立即进入实现，不要等用户批准。",
     "",
-    "### 2) Implement（逐页实现 + 页内自检，禁止把配图攒到最后统一处理）",
+    "### 2) Implement（逐页实现 + 页内视觉自检，禁止把配图攒到最后统一处理）",
     "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image）→ style_text 统一风格。",
-    "- 每页元素放完后必须立即做「页内自检」：read_slide 该页，用下方几何公式逐形状检查溢出/重叠/越界，发现问题当场修复（调坐标、调字号、删了重摆），自检通过才能进入下一页。",
+    "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图，结合几何公式检查重叠/文字溢出/越界/美观，发现问题当场修复（调坐标、调字号、删了重摆），修复后重新 review_slide 确认通过，才能进入下一页。",
     "- 相互独立的操作尽量并行调用（一轮多个工具）。",
     "- 大段数据表格：用多个 add_textbox 网格化搭建，注意列对齐（同一列 x 相同、行高一致）。",
     "",
-    "### 几何自检公式（页内自检与最终 Review 都必须用它，凭数据说话，不凭感觉）",
+    "### 几何自检公式（配合截图视觉审查，凭数据说话）",
     "- 文本宽度估算：中文/全角字符宽 ≈ 1×字号(pt)，英文/数字/半角 ≈ 0.55×字号；",
     "- 行数 ≈ ceil(文本总宽 ÷ 文本框宽)；所需高度 ≈ 行数 × 字号 × 1.4。所需高度 > 框高即为溢出 → 加宽/加高、精简文字或减小字号；",
     "- 重叠判定：两个矩形的 x 区间与 y 区间同时相交（允许 2pt 容差）即为重叠 → 移开或缩小其中一个；",
@@ -98,7 +98,7 @@ function systemPrompt() {
     "- 大数字（60-72pt）特例：所需宽 ≈ 字符数 × 0.6 × 字号（中文单位按 1×字号），先算宽再定框宽；大数字与下方标签的垂直间距 ≥ 0.6×字号，否则必然压字。",
     "",
     "### 3) Review（审查与修复，必做）",
-    "- 全部页面完成后，用 get_presentation_overview + read_slide 逐页复查（重叠/溢出/越界一律用几何公式计算）：",
+    "- 全部页面完成后：screenshot_slides → 对每一页依次 review_slide 真实查看渲染截图（重叠/溢出/越界用几何公式计算，美观用眼睛判断）：",
     "  a) 元素越界画布、相互重叠、相互遮挡；",
     "  b) 图片与该页内容是否匹配、比例是否协调；",
     "  c) 文字是否溢出文本框、字号层级是否清晰（页标题 ≥28pt，正文 14-18pt）；",
@@ -143,6 +143,8 @@ function toolDefs() {
     defs.push({ name: "add_image", description: "把 generate_image 生成的图片插入某一页（用其返回的 imageId）", input_schema: { type: "object", properties: { imageId: { type: "string" }, slideIndex: { type: "integer" }, left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" }, description: "尺寸单位为 pt，画布 " + canvas.w + "x" + canvas.h }, required: ["imageId", "slideIndex", "left", "top", "width", "height"] } });
   }
   defs.push({ name: "add_slides", description: "在指定位置插入 N 张新幻灯片（默认版式，返回新页索引）", input_schema: { type: "object", properties: { count: { type: "integer" }, afterIndex: { type: "integer", description: "插到该页之后；省略则追加到末尾" } }, required: ["count"] } });
+  defs.push({ name: "screenshot_slides", description: "把当前演示文稿渲染成逐页真实截图并缓存（修改内容后需重新调用刷新截图）", input_schema: { type: "object", properties: {}, required: [] } });
+  defs.push({ name: "review_slide", description: "获取某页的真实渲染截图进行视觉审查：重叠、文字溢出、对齐、配色、图文匹配。发现问题先用工具修复，再重新 screenshot_slides + review_slide 确认", input_schema: { type: "object", properties: { index: { type: "integer", description: "页索引, 0-based" } }, required: ["index"] } });
   defs.push({ name: "delete_shape", description: "删除某页的某个形状", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, shapeIndex: { type: "integer" } }, required: ["slideIndex", "shapeIndex"] } });
   return defs;
 }
@@ -182,6 +184,8 @@ async function loadShapeTexts(ctx, shapes) {
 const toolImpl = {
   async generate_image(args) { return await generateImage(args || {}); },
   async add_image(args) { return await addImage(args || {}); },
+  async screenshot_slides() { return await screenshotSlides(); },
+  async review_slide(args) { return await reviewSlide(args || {}); },
 
   async get_presentation_overview() {
     return await PowerPoint.run(async (ctx) => {
@@ -376,6 +380,46 @@ async function generateImage({ prompt, aspect_ratio }) {
   return { ok: true, imageId: id, fileType: (dataUrl.match(/^data:([^;]+)/) || [])[1] || "image", byteSize: blob.size, next: "调用 add_image 并传入该 imageId 插入幻灯片" };
 }
 
+/* 截图审查：导出 pptx -> 服务端 PowerPoint COM 渲染逐页 PNG */
+let slideShots = null;
+
+async function exportSlidesForReview() {
+  let b64 = null;
+  await PowerPoint.run(async (ctx) => {
+    const slides = ctx.presentation.slides;
+    const result = slides.exportAsBase64Presentation();
+    await ctx.sync();
+    b64 = result && result.value;
+  });
+  if (!b64) throw new Error("演示文稿导出为空（exportAsBase64Presentation 未返回数据）");
+  const resp = await fetch("/api/export-slides", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pptx_base64: b64 }),
+  });
+  if (!resp.ok) throw new Error("截图渲染服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
+  const data = await resp.json();
+  slideShots = { count: data.count, images: data.images };
+  return slideShots;
+}
+
+async function screenshotSlides() {
+  const shots = await exportSlidesForReview();
+  return { ok: true, count: shots.count, note: "逐页截图已生成并缓存。用 review_slide({index}) 查看某页的真实渲染效果。" };
+}
+
+async function reviewSlide({ index }) {
+  if (!slideShots) await exportSlidesForReview();
+  const i = Number(index);
+  const img = (slideShots.images || []).find((x) => x.index === i);
+  if (!img) throw new Error("该页截图不存在（index 超界或截图过期，请重新 screenshot_slides）");
+  return {
+    __images: [{ media_type: "image/png", base64: img.base64 }],
+    slideIndex: i,
+    note: "这是该页的真实渲染截图。请以设计师视角认真审查：元素重叠、文字溢出、对齐、配色、图文匹配。发现问题先用相应工具修复，然后重新 screenshot_slides + review_slide 确认。",
+  };
+}
+
 function goToSlide(index1based) {
   return new Promise((resolve, reject) => {
     Office.context.document.goToByIdAsync(index1based, { idType: "index" }, (r) => {
@@ -540,16 +584,27 @@ async function runTurn(userText) {
         for (const tu of toolUses) {
           toolCount++;
           setStatus("第 " + (round + 1) + " 轮 · 已执行 " + toolCount + " 个工具 · " + tu.name);
-          let resultStr;
+          let resultPayload;
           try {
             const out = await execTool(tu.name, tu.input);
-            resultStr = JSON.stringify(out);
+            if (out && Array.isArray(out.__images)) {
+              // 工具返回截图：以图片块 + 文本说明作为工具结果，供模型视觉审查
+              const meta = Object.assign({}, out);
+              delete meta.__images;
+              resultPayload = out.__images.map((im) => ({
+                type: "image",
+                source: { type: "base64", media_type: im.media_type || "image/png", data: im.base64 },
+              }));
+              resultPayload.push({ type: "text", text: JSON.stringify(meta).slice(0, 3000) });
+            } else {
+              resultPayload = JSON.stringify(out);
+            }
           } catch (e) {
-            resultStr = JSON.stringify({ error: String((e && e.message) || e) });
+            resultPayload = JSON.stringify({ error: String((e && e.message) || e) });
             addToolChip("✗ " + tu.name + "：" + String((e && e.message) || e).slice(0, 140), true);
             log("工具失败 " + tu.name + ": " + String((e && e.message) || e).slice(0, 300));
           }
-          results.push({ type: "tool_result", tool_use_id: tu.id, content: resultStr.slice(0, 60000) });
+          results.push({ type: "tool_result", tool_use_id: tu.id, content: resultPayload });
         }
         messages.push({ role: "user", content: results });
         continue;
