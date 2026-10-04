@@ -685,10 +685,10 @@ async function runTurn(userText) {
           log("上下文压缩失败（跳过）: " + String((e && e.message) || e));
         }
       }
-      // 体积熔断：压缩后仍过大（约 3MB）才停止
+      // 体积熔断：压缩尝试过仍降不下来（阈值 ×2，约 40-60 万 token）才停止——再大必然超模型上下文
       const afterSize = JSON.stringify(messages).length;
-      if (afterSize > 3000000) {
-        addMsg("assistant", "⚠ 对话历史体积已达 " + Math.round(afterSize / 10000) / 100 + " MB，继续会超出模型上下文。请点「新会话」开始新任务。");
+      if (afterSize > COMPACT_THRESHOLD * 2) {
+        addMsg("assistant", "⚠ 对话历史已达 " + Math.round(afterSize / 1024) + " KB（摘要压缩未能生效），继续会超出模型上下文。请点「新会话」开始新任务。");
         return;
       }
       setStatus("第 " + (round + 1) + " 轮 · 思考中…");
