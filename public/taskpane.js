@@ -86,6 +86,7 @@ function systemPrompt() {
     "",
     "### 2) Implement（逐页实现 + 页内视觉自检，禁止把配图攒到最后统一处理）",
     "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image）→ style_text 统一风格。",
+    "- 注意：新建演示文稿的初始页自带版式占位符（标题/副标题框）。占位符不能被 delete_shape 删除（会自动降级为移出画布+清空文字）；更推荐直接对占位符 set_shape_text 写入标题内容加以利用。",
     "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图，结合几何公式检查重叠/文字溢出/越界/美观，发现问题当场修复（调坐标、调字号、删了重摆），修复后重新 review_slide 确认通过，才能进入下一页。",
     "- 相互独立的操作尽量并行调用（一轮多个工具）。",
     "- 大段数据表格：用多个 add_textbox 网格化搭建，注意列对齐（同一列 x 相同、行高一致）。",
@@ -321,13 +322,26 @@ const toolImpl = {
   },
 
   async delete_shape({ slideIndex, shapeIndex }) {
-    return await PowerPoint.run(async (ctx) => {
-      const sh = (await getShapesOfSlide(ctx, Number(slideIndex))).getItemAt(Number(shapeIndex));
+    const tryDelete = async (ctx2) => {
+      const sh = (await getShapesOfSlide(ctx2, Number(slideIndex))).getItemAt(Number(shapeIndex));
       if (typeof sh.delete !== "function") throw new Error("宿主不支持删除形状");
       sh.delete();
-      await ctx.sync();
-      return { ok: true };
-    });
+      await ctx2.sync();
+    };
+    try {
+      return await PowerPoint.run(tryDelete);
+    } catch (e) {
+      // 占位符等形状宿主拒绝删除（GeneralException）：降级为"移出画布 + 清空文字"
+      log("delete_shape 降级（可能是版式占位符）: " + String((e && e.message) || e));
+      return await PowerPoint.run(async (ctx) => {
+        const sh = (await getShapesOfSlide(ctx, Number(slideIndex))).getItemAt(Number(shapeIndex));
+        sh.left = -2000;
+        sh.top = -2000;
+        try { sh.textFrame.textRange.text = ""; } catch (e2) {}
+        await ctx.sync();
+        return { ok: true, via: "moved-offcanvas", note: "该形状是版式占位符，宿主不允许直接删除；已移出画布并清空文字（视觉上等同删除）" };
+      });
+    }
   },
 };
 
