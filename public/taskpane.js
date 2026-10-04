@@ -237,19 +237,41 @@ const toolImpl = {
       const slides = ctx.presentation.slides;
       const n = Math.max(1, Math.min(20, Number(count) || 1));
       const start = afterIndex == null ? null : Number(afterIndex);
-      const created = [];
-      for (let k = 0; k < n; k++) {
-        let s;
-        if (start == null) {
-          s = typeof slides.add === "function" ? slides.add() : slides.add({});
-        } else {
-          s = slides.add({ index: start + 1 + k });
-        }
-        s.load("id");
-        created.push(s);
-      }
+      slides.load("items/id");
       await ctx.sync();
-      return { ok: true, added: n, newSlideIds: created.map((s) => safe(() => s.id)) };
+      const beforeIds = slides.items.map((s) => String(safe(() => s.id)));
+      let usedInsert = typeof slides.add !== "function";
+
+      if (!usedInsert) {
+        // 主通道：slides.add（PowerPointApi 1.5+）
+        try {
+          for (let k = 0; k < n; k++) {
+            const s = start == null ? slides.add() : slides.add({ index: start + 1 + k });
+            s.load("id");
+            await ctx.sync();
+          }
+        } catch (e) {
+          log("slides.add 失败，改用 insertSlidesFromBase64: " + String((e && e.message) || e));
+          usedInsert = true;
+        }
+      }
+      if (usedInsert) {
+        // 备用通道：插入空白模板页（insertSlidesFromBase64，PowerPointApi 1.3 起可用）
+        const tpl = await fetchBlankBase64();
+        for (let k = 0; k < n; k++) {
+          const targetId = start == null ? beforeIds[beforeIds.length - 1] : beforeIds[Math.min(start + k, beforeIds.length - 1)];
+          ctx.presentation.insertSlidesFromBase64(tpl, { targetSlideId: targetId });
+          await ctx.sync();
+        }
+      }
+      slides.load("items/id");
+      await ctx.sync();
+      const afterIds = slides.items.map((s) => String(safe(() => s.id)));
+      const newIndices = [];
+      for (let i = 0; i < afterIds.length; i++) {
+        if (beforeIds.indexOf(afterIds[i]) === -1) newIndices.push(i);
+      }
+      return { ok: true, method: usedInsert ? "insertSlidesFromBase64" : "slides.add", added: newIndices.length || n, newSlideIndices: newIndices };
     });
   },
 
@@ -313,9 +335,54 @@ async function generateImage({ prompt, aspect_ratio }) {
   return { ok: true, imageId: id, fileType: (dataUrl.match(/^data:([^;]+)/) || [])[1] || "image", byteSize: blob.size, next: "调用 add_image 并传入该 imageId 插入幻灯片" };
 }
 
+function goToSlide(index1based) {
+  return new Promise((resolve, reject) => {
+    Office.context.document.goToByIdAsync(index1based, { idType: Office.IdType.Index }, (r) => {
+      if (r.status === Office.AsyncResultStatus.Succeeded) resolve(true);
+      else reject(new Error((r.error && r.error.message) || "跳转幻灯片失败"));
+    });
+  });
+}
+
+function setSelectedImage(b64, opts) {
+  return new Promise((resolve, reject) => {
+    Office.context.document.setSelectedDataAsync(b64, Object.assign({ coercionType: Office.CoercionType.Image }, opts), (r) => {
+      if (r.status === Office.AsyncResultStatus.Succeeded) resolve(true);
+      else reject(new Error((r.error && r.error.message) || "插入图片失败"));
+    });
+  });
+}
+
+let blankPptxB64 = null;
+async function fetchBlankBase64() {
+  if (blankPptxB64) return blankPptxB64;
+  const resp = await fetch("/blank.pptx");
+  if (!resp.ok) throw new Error("blank.pptx 模板缺失（public/blank.pptx）");
+  const buf = new Uint8Array(await resp.arrayBuffer());
+  let bin = "";
+  const CH = 0x8000;
+  for (let i = 0; i < buf.length; i += CH) bin += String.fromCharCode.apply(null, buf.subarray(i, i + CH));
+  blankPptxB64 = btoa(bin);
+  return blankPptxB64;
+}
+
 async function addImage({ imageId, slideIndex, left, top, width, height }) {
   const b64 = imageCache[imageId];
   if (!b64) throw new Error("imageId 不存在：只能使用本次会话中 generate_image 返回的 id");
+  const pos = {};
+  if (left != null) pos.imageLeft = Number(left);
+  if (top != null) pos.imageTop = Number(top);
+  if (width != null) pos.imageWidth = Number(width);
+  if (height != null) pos.imageHeight = Number(height);
+  // 主通道：通用 API（Office 2013 起全平台可用）——先跳到目标页，再按坐标插入
+  if (slideIndex != null) await goToSlide(Number(slideIndex) + 1);
+  try {
+    await setSelectedImage(b64, pos);
+    return { ok: true, via: "setSelectedDataAsync" };
+  } catch (e1) {
+    log("setSelectedDataAsync 插图失败，改用富 API addImage: " + String((e1 && e1.message) || e1));
+  }
+  // 备用：富 API（需要 PowerPointApi 1.4 且宿主 JS 完整）
   return await PowerPoint.run(async (ctx) => {
     const shapes = await getShapesOfSlide(ctx, Number(slideIndex));
     const opts = {};
@@ -326,7 +393,7 @@ async function addImage({ imageId, slideIndex, left, top, width, height }) {
     const sh = shapes.addImage(b64, opts);
     sh.load("id");
     await ctx.sync();
-    return { ok: true, shapeId: safe(() => sh.id) };
+    return { ok: true, via: "addImage", shapeId: safe(() => sh.id) };
   });
 }
 
@@ -381,7 +448,7 @@ async function callApi(body, signal) {
 async function runTurn(userText) {
   messages.push({ role: "user", content: userText });
   abortCtrl = new AbortController();
-  const MAX_ROUNDS = 15;
+  const MAX_ROUNDS = 24;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       setStatus(round === 0 ? "思考中…" : "根据工具结果继续思考…");
@@ -412,6 +479,7 @@ async function runTurn(userText) {
             resultStr = JSON.stringify({ error: String((e && e.message) || e) });
             chip.textContent = "🔧 " + tu.name + " ✗ " + String((e && e.message) || e).slice(0, 120);
             chip.classList.add("err");
+            log("工具失败 " + tu.name + ": " + String((e && e.message) || e).slice(0, 300));
           }
           results.push({ type: "tool_result", tool_use_id: tu.id, content: resultStr.slice(0, 60000) });
         }
@@ -454,6 +522,19 @@ function detectCaps() {
     $("capBadge").textContent = "宿主: PowerPoint ✓  |  能力: " + (sets.join(", ") || "基本") +
       "  |  模型: " + settings.model;
     log("能力检测: " + (sets.join(", ") || "基本"));
+    // 黑匣子：记录实际可用的 JS 表面（方法原型），用于诊断"能力集已报但方法缺失"类问题
+    try {
+      const shapeKeys = Object.getOwnPropertyNames(PowerPoint.ShapeCollection.prototype).filter((k) => k[0] !== "_");
+      const slideKeys = Object.getOwnPropertyNames(PowerPoint.SlideCollection.prototype).filter((k) => k[0] !== "_");
+      log("Surface ShapeCollection: " + shapeKeys.join(","));
+      log("Surface SlideCollection: " + slideKeys.join(","));
+    } catch (e) {
+      log("Surface 探测失败: " + String((e && e.message) || e));
+    }
+    try {
+      const res = performance.getEntriesByType("resource").filter((r) => /\.js/i.test(r.name)).map((r) => r.name.split("/").pop());
+      log("JS资源: " + res.join(", "));
+    } catch (e) {}
   } catch (e) {
     $("capBadge").textContent = "能力检测失败: " + String((e && e.message) || e);
     log("能力检测失败: " + String((e && e.message) || e));
