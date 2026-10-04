@@ -87,7 +87,7 @@ function systemPrompt() {
     "",
     "### 2) Implement（逐页实现 + 页内视觉自检，禁止把配图攒到最后统一处理）",
     "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image 精确插入本页）→ style_text 统一风格。",
-    "- 注意：新建演示文稿的初始页自带版式占位符（标题/副标题框）。占位符不能被 delete_shape 删除（会自动降级为移出画布+清空文字）；更推荐直接对占位符 set_shape_text 写入标题内容加以利用。",
+    "- 注意：新建演示文稿的初始页自带版式占位符（标题/副标题框）。占位符无法删除/移动——不要浪费轮次去删它（delete_shape 会自动安全降级）；封面标题建议直接对标题占位符 set_shape_text 写入内容加以利用。",
     "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图，结合几何公式检查重叠/文字溢出/越界/美观，发现问题当场修复（调坐标、调字号、删了重摆），修复后重新 review_slide 确认通过，才能进入下一页。",
     "- 相互独立的操作尽量并行调用（一轮多个工具）。",
     "- 大段数据表格：用多个 add_textbox 网格化搭建，注意列对齐（同一列 x 相同、行高一致）。",
@@ -320,18 +320,35 @@ const toolImpl = {
     } catch (e) {
       const code = String((e && e.code) || "");
       if (code && code !== "GeneralException") throw e; // 越界等非占位符问题原样上报
-      // 占位符等形状宿主拒绝删除（GeneralException）：降级为"移出画布 + 清空文字"
-      // 实测本宿主移动占位符同样被拒，最终降级为"仅清空文字"（空占位符在放映/截图中不可见）
+      // 占位符：删除/移动/清空在宿主上可能全被拒。逐项独立尝试（每次全新 run，
+      // 避免失败操作污染同步队列）；全部失败时明确告知模型"忽略它"（空占位符不可见）
       log("delete_shape 降级（可能是版式占位符）: " + String((e && e.message) || e));
-      return await PowerPoint.run(async (ctx) => {
-        const sh = (await getShapesOfSlide(ctx, Number(slideIndex))).getItemAt(Number(shapeIndex));
-        let moved = false;
-        let cleared = false;
-        try { sh.left = -2000; sh.top = -2000; await ctx.sync(); moved = true; } catch (e2) {}
-        try { sh.textFrame.textRange.text = ""; await ctx.sync(); cleared = true; } catch (e3) {}
-        if (!moved && !cleared) throw new Error("占位符既不能删除也不能移动/清空");
-        return { ok: true, via: moved ? "moved-offcanvas" : "text-cleared", note: "占位符无法删除；已" + (moved ? "移出画布" : "清空文字") + "（空占位符在放映与截图中不可见）" };
-      });
+      try {
+        return await PowerPoint.run(async (ctx) => {
+          const sh = (await getShapesOfSlide(ctx, Number(slideIndex))).getItemAt(Number(shapeIndex));
+          sh.left = -2000;
+          sh.top = -2000;
+          await ctx.sync();
+          return { ok: true, via: "moved-offcanvas" };
+        });
+      } catch (e2) {
+        log("移出画布失败: " + String((e2 && e2.message) || e2));
+      }
+      try {
+        return await PowerPoint.run(async (ctx) => {
+          const sh = (await getShapesOfSlide(ctx, Number(slideIndex))).getItemAt(Number(shapeIndex));
+          sh.textFrame.textRange.text = "";
+          await ctx.sync();
+          return { ok: true, via: "text-cleared", note: "占位符无法删除/移动，已清空文字（空占位符在放映与截图中不可见）" };
+        });
+      } catch (e3) {
+        log("清空文字失败: " + String((e3 && e3.message) || e3));
+      }
+      return {
+        ok: true,
+        via: "ignored",
+        note: "该占位符无法删除/移动/清空。若它是空的，在放映与截图中本来就不可见，请直接忽略它、在旁边规划内容；若它带有文字，请用 set_shape_text 改写它",
+      };
     }
   },
 };
