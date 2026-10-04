@@ -297,6 +297,56 @@ async function handleExportSlides(req, res) {
   res.end(JSON.stringify(out));
 }
 
+/* ---------- 图片插入（PowerPoint COM，精确页 + 坐标）---------- */
+async function handleInsertImage(req, res) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  let body;
+  try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch (e) {}
+  const imgB64 = body && body.image_base64;
+  const slideNumber = Math.floor(Number(body && body.slide_number) || 0);
+  if (!imgB64 || slideNumber < 1) {
+    res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ error: "缺少 image_base64 或 slide_number 非法" }));
+  }
+  const mediaType = (body.media_type || "image/png").toLowerCase();
+  const ext = mediaType.includes("jpeg") ? ".jpg" : ".png";
+  const left = Number(body.left) || 0;
+  const top = Number(body.top) || 0;
+  const width = Number(body.width) || 0;
+  const height = Number(body.height) || 0;
+
+  const run = exportLock.then(() => new Promise((resolve, reject) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slilot-img-"));
+    const imagePath = path.join(tmp, "image" + ext);
+    try {
+      fs.writeFileSync(imagePath, Buffer.from(imgB64, "base64"));
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         path.join(__dirname, "scripts", "insert-image.ps1"),
+         "-ImagePath", imagePath, "-SlideNumber", String(slideNumber),
+         "-Left", String(left), "-Top", String(top), "-Width", String(width), "-Height", String(height)],
+        { timeout: 60000, windowsHide: true },
+        (err, stdout, stderr) => {
+          try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+          if (err) {
+            return reject(new Error(String((err.message || err)).slice(0, 200) + " " + String(stdout || "") + String(stderr || "").slice(0, 300)));
+          }
+          resolve();
+        }
+      );
+    } catch (e) {
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e2) {}
+      reject(e);
+    }
+  }));
+  exportLock = run.catch(() => {});
+  await run;
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify({ ok: true }));
+}
+
 function handleStatic(req, res, pathname) {
   let p = decodeURIComponent(pathname);
   if (p === "/") p = "/taskpane.html";
@@ -331,6 +381,9 @@ const handler = async (req, res) => {
     } else if (url.pathname === "/api/export-slides") {
       // 幻灯片截图：pptx_base64 -> 逐页 PNG base64（PowerPoint COM 渲染）
       await handleExportSlides(req, res);
+    } else if (url.pathname === "/api/insert-image") {
+      // 精确插图：指定页 + 坐标（PowerPoint COM AddPicture）
+      await handleInsertImage(req, res);
     } else if (url.pathname === "/client-log") {
       // 面板"黑匣子"：接收页面 JS 错误与状态日志
       const chunks = [];

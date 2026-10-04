@@ -84,7 +84,7 @@ function systemPrompt() {
     "- 用几行向用户展示规划（每页一行），然后立即进入实现，不要等用户批准。",
     "",
     "### 2) Implement（逐页实现 + 页内视觉自检，禁止把配图攒到最后统一处理）",
-    "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image）→ style_text 统一风格。",
+    "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image 精确插入本页）→ style_text 统一风格。",
     "- 注意：新建演示文稿的初始页自带版式占位符（标题/副标题框）。占位符不能被 delete_shape 删除（会自动降级为移出画布+清空文字）；更推荐直接对占位符 set_shape_text 写入标题内容加以利用。",
     "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图，结合几何公式检查重叠/文字溢出/越界/美观，发现问题当场修复（调坐标、调字号、删了重摆），修复后重新 review_slide 确认通过，才能进入下一页。",
     "- 相互独立的操作尽量并行调用（一轮多个工具）。",
@@ -138,7 +138,7 @@ function toolDefs() {
   if (has("addTextBox")) {
     defs.push({ name: "add_textbox", description: "在某一页插入文本框", input_schema: { type: "object", properties: { slideIndex: { type: "integer" }, text: { type: "string" }, left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" }, fontSize: { type: "number" }, bold: { type: "boolean" }, colorHex: { type: "string" } }, required: ["slideIndex", "text", "left", "top", "width", "height"] } });
     defs.push({ name: "generate_image", description: "调用图像生成模型生成一张图片（生成后返回 imageId，需再用 add_image 插入幻灯片）", input_schema: { type: "object", properties: { prompt: { type: "string", description: "图片内容描述，具体、可视化" }, aspect_ratio: { type: "string", description: "宽高比，如 1:1、16:9、4:3，默认 1:1" } }, required: ["prompt"] } });
-    defs.push({ name: "add_image", description: "把 generate_image 生成的图片插入某一页（用其返回的 imageId）", input_schema: { type: "object", properties: { imageId: { type: "string" }, slideIndex: { type: "integer" }, left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number" }, description: "尺寸单位为 pt，画布 " + canvas.w + "x" + canvas.h }, required: ["imageId", "slideIndex", "left", "top", "width", "height"] } });
+    defs.push({ name: "add_image", description: "把 generate_image 生成的图片插入某一页（用其返回的 imageId）", input_schema: { type: "object", properties: { imageId: { type: "string" }, slideIndex: { type: "integer" }, left: { type: "number" }, top: { type: "number" }, width: { type: "number" }, height: { type: "number", description: "尺寸单位 pt，画布 " + canvas.w + "x" + canvas.h } }, required: ["imageId", "slideIndex", "left", "top", "width", "height"] } });
   }
   defs.push({ name: "add_slides", description: "在指定位置插入 N 张新幻灯片（默认版式，返回新页索引）", input_schema: { type: "object", properties: { count: { type: "integer" }, afterIndex: { type: "integer", description: "插到该页之后；省略则追加到末尾" } }, required: ["count"] } });
   defs.push({ name: "screenshot_slides", description: "把当前演示文稿渲染成逐页真实截图并缓存（修改内容后需重新调用刷新截图）", input_schema: { type: "object", properties: {}, required: [] } });
@@ -319,14 +319,16 @@ const toolImpl = {
       const code = String((e && e.code) || "");
       if (code && code !== "GeneralException") throw e; // 越界等非占位符问题原样上报
       // 占位符等形状宿主拒绝删除（GeneralException）：降级为"移出画布 + 清空文字"
+      // 实测本宿主移动占位符同样被拒，最终降级为"仅清空文字"（空占位符在放映/截图中不可见）
       log("delete_shape 降级（可能是版式占位符）: " + String((e && e.message) || e));
       return await PowerPoint.run(async (ctx) => {
         const sh = (await getShapesOfSlide(ctx, Number(slideIndex))).getItemAt(Number(shapeIndex));
-        sh.left = -2000;
-        sh.top = -2000;
-        try { sh.textFrame.textRange.text = ""; } catch (e2) {}
-        await ctx.sync();
-        return { ok: true, via: "moved-offcanvas", note: "该形状是版式占位符，宿主不允许直接删除；已移出画布并清空文字（视觉上等同删除）" };
+        let moved = false;
+        let cleared = false;
+        try { sh.left = -2000; sh.top = -2000; await ctx.sync(); moved = true; } catch (e2) {}
+        try { sh.textFrame.textRange.text = ""; await ctx.sync(); cleared = true; } catch (e3) {}
+        if (!moved && !cleared) throw new Error("占位符既不能删除也不能移动/清空");
+        return { ok: true, via: moved ? "moved-offcanvas" : "text-cleared", note: "占位符无法删除；已" + (moved ? "移出画布" : "清空文字") + "（空占位符在放映与截图中不可见）" };
       });
     }
   },
@@ -467,27 +469,39 @@ async function fetchBlankBase64() {
 async function addImage({ imageId, slideIndex, left, top, width, height }) {
   const b64 = imageCache[imageId];
   if (!b64) throw new Error("imageId 不存在：只能使用本次会话中 generate_image 返回的 id");
+  // 主通道：本地服务 COM 插图（AddPicture 精确指定页与坐标，不依赖宿主 JS 表面）
+  try {
+    const resp = await fetch("/api/insert-image", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        image_base64: b64,
+        slide_number: Number(slideIndex) + 1,
+        left: Math.round(Number(left) || 0),
+        top: Math.round(Number(top) || 0),
+        width: Math.round(Number(width) || 0),
+        height: Math.round(Number(height) || 0),
+      }),
+    });
+    if (!resp.ok) throw new Error("COM 插图服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
+    return { ok: true, via: "com-addpicture" };
+  } catch (e1) {
+    log("COM 插图失败，改用通用 API（将落入当前显示页）: " + String((e1 && e1.message) || e1));
+  }
+  // 备用：通用 API（图片会插入当前显示页，无法指定页）
   const pos = {};
   if (left != null) pos.imageLeft = Number(left);
   if (top != null) pos.imageTop = Number(top);
   if (width != null) pos.imageWidth = Number(width);
   if (height != null) pos.imageHeight = Number(height);
-  // 主通道：通用 API（Office 2013 起全平台可用）——先跳到目标页，再按坐标插入
-  let jumpFailed = false;
   if (slideIndex != null) {
     try { await goToSlide(Number(slideIndex) + 1); }
     catch (e) {
-      // 跳页失败不致命：图片将插入当前显示页
-      jumpFailed = true;
       log("goToSlide 失败（忽略）: " + String((e && e.message) || e));
     }
   }
-  try {
-    await setSelectedImage(b64, pos);
-    return { ok: true, via: "setSelectedDataAsync", jumpFailed, note: jumpFailed ? "未能跳页，图片插在了当前显示页" : undefined };
-  } catch (e1) {
-    throw new Error("插图失败（setSelectedDataAsync: " + String((e1 && e1.message) || e1) + "）。请检查目标页与坐标后重试");
-  }
+  await setSelectedImage(b64, pos);
+  return { ok: true, via: "setSelectedDataAsync", note: "已插入当前显示页" };
 }
 
 function log(msg) {
