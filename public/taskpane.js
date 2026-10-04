@@ -93,9 +93,18 @@ function systemPrompt() {
     "  a) 元素越界画布、相互重叠、相互遮挡；",
     "  b) 图片与该页内容是否匹配、比例是否协调；",
     "  c) 文字是否溢出文本框、字号层级是否清晰（页标题 ≥28pt，正文 14-18pt）；",
-    "  d) 页数、页序、内容与 Plan 是否一致。",
-    "- 发现 P0/P1 问题（重叠、越界、图文错配、明显失衡）必须当场修复：改文本（set_shape_text）、删除重摆（delete_shape + add_textbox/add_image）、调整样式（style_text）。",
+    "  d) 页数、页序、内容与 Plan 是否一致；",
+    "  e) 风格一致性：全篇是否遵守下方「默认设计系统」（配色 ≤3 色、无装饰线/色条、母题统一、图片风格统一、对齐一致）。",
+    "- 发现 P0/P1 问题（重叠、越界、图文错配、明显失衡、风格跑偏）必须当场修复：改文本（set_shape_text）、删除重摆（delete_shape + add_textbox/add_image）、调整样式（style_text）。",
     "- 最后向用户汇报：规划了什么、每页做了什么、Review 发现并修复了什么。",
+    "",
+    "## 默认设计系统（简约风；用户明确指定主题时才可覆盖）",
+    "- 配色三件套：背景纯白 " + THEME.colors.bg + "，主文字 " + THEME.colors.ink + "，次要文字 " + THEME.colors.muted + "；全篇唯一强调色 " + THEME.colors.accent + "（只给关键数字、高亮词、图标用，占比小而锐利）。可见颜色不超过 3 种，禁止默认蓝色系和米黄/暖灰背景。",
+    "- 字号阶梯：内容页标题 " + THEME.fontSizes.title + "pt 加粗（左对齐，仅封面标题可居中）；小节标题 " + THEME.fontSizes.section + "pt 加粗；正文 " + THEME.fontSizes.body + "pt 左对齐；注释/标签 " + THEME.fontSizes.caption + "pt 灰色；关键大数字 " + THEME.fontSizes.bigStat + "pt 强调色 + 下方小标签。",
+    "- 布局网格：四边安全边距 " + THEME.margin + "pt；内容块间距 " + THEME.gapMin + "-" + (THEME.gapMin + 14) + "pt 且全篇一致；同一列元素 x 坐标完全相同、行高一致。",
+    "- 禁止清单（AI 味的标志）：标题下加彩色/灰色横线；页眉页脚色条、侧边竖条、卡片描边条；把同一版式原样复制到每一页；只给某一页做样式而其余页面裸奔；低对比度文字。",
+    "- 视觉母题：选定一个母题并贯穿全篇（推荐：圆角图片框，或橙色圆形底 + 白色图标/序号），每页都出现；内容页每页都要有视觉元素（图片、大数字、图形），禁止纯文字页。",
+    "- 图片风格统一：所有 generate_image 的提示词都必须以固定风格后缀结尾——「" + THEME.imageStyle + "」，只按页面内容改主体描述，不改风格描述。",
     "",
     "## 通用规则",
     "- 全程用中文，回复简洁。",
@@ -377,6 +386,26 @@ function setSelectedImage(b64, opts) {
 }
 
 let blankPptxB64 = null;
+
+/* ---------------- 默认设计系统（简约风）----------------
+ * 生成页面默认遵循这套设计令牌；要换主题改这里，或在对话里明确指定。
+ * 参考了 Anthropic pptx skill 的公开设计规则：一主一强调的克制配色、
+ * 字号阶梯、充足留白、每页必有视觉元素、禁止装饰线/色条等 AI 味元素。
+ */
+const THEME = {
+  margin: 36,                    // 安全边距(pt)，约 0.5 英寸
+  gapMin: 22,                    // 内容块最小间距(pt)
+  colors: {
+    bg: "#FFFFFF",               // 背景：纯白（禁用米黄/暖灰底）
+    ink: "#1F2933",              // 主文字：近黑
+    muted: "#6B7280",            // 次要文字：中性灰
+    accent: "#C9452B",           // 唯一强调色：Slilot 橙（关键数字/高亮/图标用）
+    line: "#E5E7EB",             // 细线（克制使用）
+  },
+  fontSizes: { title: 30, section: 20, body: 15, caption: 11, bigStat: 64 },
+  imageStyle: "扁平极简矢量插画，纯白背景，黑灰主调 + 少量橙红色点缀，线条简洁，构图留白，图中不出现文字",
+};
+
 async function fetchBlankBase64() {
   if (blankPptxB64) return blankPptxB64;
   const resp = await fetch("/blank.pptx");
