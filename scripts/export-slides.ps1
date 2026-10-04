@@ -29,7 +29,8 @@ if ($null -eq $pres) {
 
 $count = $pres.Slides.Count
 for ($i = 1; $i -le $count; $i++) {
-  $png = Join-Path $OutDir ("slide-" + $i + ".png")
-  $pres.Slides.Item($i).Export($png, "PNG", 1280, 720)
+  # JPG + 1024 宽：截图只供模型视觉审查，控制体积（PNG 全尺寸单张可达数百 KB）
+  $png = Join-Path $OutDir ("slide-" + $i + ".jpg")
+  $pres.Slides.Item($i).Export($png, "JPG", 1024, 576)
 }
 Write-Output ("exported " + $count + " slides")

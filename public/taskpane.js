@@ -28,7 +28,7 @@ let toolCount = 0;           // 当前任务已执行的工具数（状态栏隐
 let runGen = 0;              // 会话代号：新会话/中止时递增，旧回路据此静默退出
 let docVersion = 0;          // 文档修改版本号：截图缓存据此失效
 let compactionAttempts = 0;  // 摘要压缩尝试次数（每次运行最多 2 次）
-const COMPACT_THRESHOLD = 328 * 1024; // ≈328KB，超过即触发摘要压缩
+const COMPACT_THRESHOLD = 2 * 1024 * 1024; // 2MB：一张审查截图就有几百 KB，阈值过低会导致压缩过早频繁触发
 
 function loadSettings() {
   try {
@@ -428,7 +428,7 @@ async function reviewSlide({ index }) {
   const img = (slideShots.images || []).find((x) => x.index === i);
   if (!img) throw new Error("该页截图不存在（index 超界或截图过期，请重新 screenshot_slides）");
   return {
-    __images: [{ media_type: "image/png", base64: img.base64 }],
+    __images: [{ media_type: "image/jpeg", base64: img.base64 }],
     slideIndex: i,
     note: "这是该页的真实渲染截图。请以设计师视角认真审查：元素重叠、文字溢出、对齐、配色、图文匹配。发现问题先用相应工具修复，然后重新 screenshot_slides + review_slide 确认。",
   };
@@ -592,7 +592,7 @@ function pruneHistory() {
       }
     });
   });
-  const keep = new Set(imgRefs.slice(-2).map((r) => r.mi + "|" + r.bi + "|" + (r.ci == null ? "" : r.ci)));
+  const keep = new Set(imgRefs.slice(-1).map((r) => r.mi + "|" + r.bi + "|" + (r.ci == null ? "" : r.ci)));
   imgRefs.forEach((r) => {
     const key = r.mi + "|" + r.bi + "|" + (r.ci == null ? "" : r.ci);
     if (keep.has(key)) return;

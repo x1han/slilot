@@ -271,7 +271,7 @@ async function doExportSlides() {
     await runExportScript(tmp);
     // 不依赖 PS 侧 manifest（避免编码交接问题），直接按文件名枚举排序
     const files = fs.readdirSync(tmp)
-      .filter((f) => /^slide-\d+\.png$/i.test(f))
+      .filter((f) => /^slide-\d+\.(?:png|jpg)$/i.test(f))
       .sort((a, b) => (parseInt(a.match(/\d+/), 10) - parseInt(b.match(/\d+/), 10)))
       .map((f) => path.join(tmp, f));
     const images = files.map((p, i) => ({ index: i, base64: fs.readFileSync(p).toString("base64") }));
