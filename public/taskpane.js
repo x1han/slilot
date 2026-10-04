@@ -82,6 +82,7 @@ function systemPrompt() {
     "- 画布为 " + canvas.w + " x " + canvas.h + " 点(pt)，原点在左上角，x 向右、y 向下，排版勿越界。",
     "- 文字要适合 PPT：短句、要点式，不要长段落。",
     "- 需要配图时：先 generate_image（描述要具体、可视化），成功后立刻 add_image 插入到合适位置和大小（图片常用 200-300pt 见方）。",
+    "- 并行调用：相互独立的操作（批量加文本框、逐格搭表格、多页布局）尽量在一条消息里同时发出多个工具调用，一轮顶几十轮，大幅提速。",
     "- 完成后简要说明做了什么；出错就如实说明并尝试换方案。",
     "- 当前宿主支持的 API 集: " + (capSets.join(", ") || "检测中") + "。不要调用不可用工具。",
   ].join("\n");
@@ -458,10 +459,10 @@ async function callApi(body, signal) {
 async function runTurn(userText) {
   messages.push({ role: "user", content: userText });
   abortCtrl = new AbortController();
-  const MAX_ROUNDS = 24;
+  const MAX_ROUNDS = 100;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      setStatus(round === 0 ? "思考中…" : "根据工具结果继续思考…");
+      setStatus("第 " + (round + 1) + " 轮 · 思考中…");
       const data = await callApi({
         model: settings.model,
         max_tokens: Number(settings.maxTokens) || 16000,
@@ -478,7 +479,7 @@ async function runTurn(userText) {
         const toolUses = (data.content || []).filter((b) => b.type === "tool_use");
         const results = [];
         for (const tu of toolUses) {
-          setStatus("执行: " + tu.name);
+          setStatus("第 " + (round + 1) + " 轮 · 执行: " + tu.name);
           const chip = addToolChip("🔧 " + tu.name + " " + JSON.stringify(tu.input || {}).slice(0, 160), false);
           let resultStr;
           try {
@@ -505,7 +506,7 @@ async function runTurn(userText) {
       addMsg("assistant", finalText);
       return;
     }
-    addMsg("assistant", "⚠ 连续执行工具轮数过多，已停止。可以继续输入指令。");
+    addMsg("assistant", "⚠ 已连续执行 " + MAX_ROUNDS + " 轮工具，自动暂停以防空转。回复「继续」我会接着未完成的部分继续做。");
   } catch (e) {
     if (e && e.name === "AbortError") {
       addMsg("assistant", "（已停止）");
