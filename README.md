@@ -1,4 +1,4 @@
-# AI PPT 助手（自建 PowerPoint 侧载加载项）
+# Slilot（自建 PowerPoint 侧载加载项）
 
 在 PowerPoint 侧边栏里与 AI 模型对话，模型通过 Office.js 工具**实时读写当前打开的演示文稿**。支持生图插图；本地服务内置格式翻译层，上游可接任意提供 `/v1/messages`、`/v1/responses` 或 `/v1/chat/completions` 的服务商。**不绑定任何厂商。**
 
@@ -40,7 +40,7 @@ PowerPoint 任务窗格 (taskpane.html/js)
 
 1. 本地服务开机自启（把 `autostart-hidden.vbs` 放进 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`），或手动双击 `start-addin.bat`。
 2. 首次运行 `npx office-addin-dev-certs install` 信任 localhost 开发证书。
-3. 侧载：运行 `install-sideload.ps1`（免管理员），重启 PowerPoint，「开始」选项卡最右侧出现 **AI → AI 助手**。
+3. 侧载：运行 `install-sideload.ps1`（免管理员），重启 PowerPoint，「开始」选项卡最右侧出现 **Slilot → AI 助手**。
 4. 打开面板 ⚙，填入上游地址 / 接口格式 / API Key / 模型 → 点「测试」→ 两项全绿后「保存」。
 5. 直接用中文提需求，例如"读完这份 PPT，在最后加一页总结"、"给第 1 页生成一张封面图，16:9"。
 

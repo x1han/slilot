@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $catalogDir = "C:\addin-catalog"
-$addinDir = "C:\Users\hxsci\ZCodeProject\ai-ppt-addin"
+$addinDir = "C:\Users\hxsci\ZCodeProject\slilot"
 
 if (-not (Test-Path $catalogDir)) { New-Item -ItemType Directory -Path $catalogDir | Out-Null }
 Copy-Item (Join-Path $addinDir "manifest.xml") $catalogDir -Force

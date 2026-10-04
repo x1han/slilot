@@ -1,4 +1,4 @@
-// AI PPT 助手 - 本地服务
+// Slilot - 本地服务
 // 1) 托管加载项静态页面 (public/)
 // 2) 通用反向代理 /api/forward：
 //    - x-upstream-url      目标地址（必须 https）
@@ -271,17 +271,17 @@ try {
   };
   server = https.createServer(tls, handler);
 } catch (e) {
-  console.error("[AI PPT 助手] 缺少 localhost 开发证书，无法启动 HTTPS。");
+  console.error("[Slilot] 缺少 localhost 开发证书，无法启动 HTTPS。");
   console.error("请先运行: npx office-addin-dev-certs install");
   console.error(String((e && e.message) || e));
   process.exit(1);
 }
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[AI PPT 助手] 服务已启动: https://localhost:${PORT}`);
+  console.log(`[Slilot] 服务已启动: https://localhost:${PORT}`);
 });
 
 server.on("error", (e) => {
-  console.error("[AI PPT 助手] 启动失败:", e.message);
+  console.error("[Slilot] 启动失败:", e.message);
   process.exit(1);
 });

@@ -7,7 +7,7 @@
 $ErrorActionPreference = "Stop"
 
 $addinId = "a7f3d9e2-6c48-4b1a-9d2f-3e5b7c9a1f84"
-$manifestPath = "C:\Users\hxsci\ZCodeProject\ai-ppt-addin\manifest.xml"
+$manifestPath = "C:\Users\hxsci\ZCodeProject\slilot\manifest.xml"
 
 if (-not (Test-Path $manifestPath)) { throw "找不到清单文件: $manifestPath" }
 
