@@ -88,6 +88,7 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 | Provider style | Upstream base | Protocol |
 |---|---|---|
 | Anthropic-compatible | `https://<host>/<anthropic-path>` | Anthropic — /v1/messages |
+| MiniMax (Anthropic-compatible) | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 | OpenAI Chat (DeepSeek / Moonshot / Zhipu, etc.) | `https://<host>` | OpenAI — /v1/chat/completions |
 

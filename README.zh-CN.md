@@ -83,6 +83,7 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 | 厂商风格 | 上游 Base | 接口格式 |
 |---|---|---|
 | Anthropic 兼容 | `https://<host>/<anthropic路径>` | Anthropic — /v1/messages |
+| MiniMax（Anthropic 兼容） | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 | OpenAI Chat（DeepSeek / Moonshot / 智谱等） | `https://<host>` | OpenAI — /v1/chat/completions |
 

@@ -594,8 +594,8 @@ function chatTarget(base, format) {
 
 /* 生图端点派生：与聊天共用上游 Base，路径一般为 /v1/image_generation（MiniMax 风格的
  * /anthropic 前缀会剥掉）；生图模型默认沿用聊天模型。非标准服务商仍可用旧字段覆盖。 */
-function imageUrl() {
-  const root = (settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
+function imageUrl(base) {
+  const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
   return settings.imageApiUrl || root + "/v1/image_generation";
 }
 
@@ -894,10 +894,20 @@ function wireUI() {
 
 function init() {
   wireUI();
-  if (typeof Office === "undefined" || !Office.onReady) {
-    showFatal("office.js 未加载（CDN 不可达？检查网络后关闭重开面板）");
-    return;
-  }
+  // CDN 不可达时本地回退脚本（office.js）加载需要时间：轮询等待 Office 就绪（最多 12 秒），
+  // 而不是立即 fatal——否则 CDN 受限的网络下面板永远起不来。
+  const t0 = Date.now();
+  (function poll() {
+    if (typeof Office !== "undefined" && Office.onReady) { startOffice(); return; }
+    if (Date.now() - t0 > 12000) {
+      showFatal("office.js 未加载（CDN 与本地回退均失败；检查网络后关闭重开面板）");
+      return;
+    }
+    setTimeout(poll, 120);
+  })();
+}
+
+function startOffice() {
   try {
     Office.onReady((info) => {
       try {
@@ -1001,7 +1011,7 @@ async function runSettingsTest() {
       headers: {
         "content-type": "application/json",
         "authorization": "Bearer " + key,
-        "x-upstream-url": imageUrl(),
+        "x-upstream-url": imageUrl(upstream),
         "x-forward-auth": "1",
       },
       signal: AbortSignal.timeout(30000),
