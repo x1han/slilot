@@ -87,7 +87,7 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 
 - 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）。识图审查要求模型支持图片输入；内置默认值是示例占位（api.example.com），测试前请在设置中替换为你自己的服务商。
-- 生图端点自动派生（`<base>/v1/image_generation`）；生图模型独立于文本模型（如 MiniMax 需 `image-01`），在设置面板分别填写「文本模型」和「生图模型」。三项测试全部通过才能保存。
+- 生图端点自动探测（先 `<base>/v1/image_generation`（MiniMax 风格），404 再试 `<base>/v1/images/generations`（OpenAI 标准），成功端点会被记住）；生图模型独立于文本模型（如 MiniMax 需 `image-01`），在设置面板分别填写「文本模型」和「生图模型」。三项测试全部通过才能保存。
 
 配置好后直接用中文提需求，例如：
 

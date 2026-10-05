@@ -388,36 +388,76 @@ async function forwardTo(url, opts) {
   });
 }
 
+/* 生图请求：自动适配两类常见端点——MiniMax 风格 /v1/image_generation（返回 data.image_urls）
+ * 与 OpenAI 标准 /v1/images/generations（返回 data[].url / b64_json）。按顺序探测，
+ * 首个可用端点会写入 settings.imageApiUrl 记住，之后直接使用。返回 { base64, mime, width, height, endpoint }。 */
+async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio) {
+  const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
+  const candidates = [];
+  if (settings.imageApiUrl) candidates.push(settings.imageApiUrl);
+  for (const p of ["/v1/image_generation", "/v1/images/generations"]) {
+    const u = root + p;
+    if (!candidates.includes(u)) candidates.push(u);
+  }
+  let lastErr = "未尝试任何端点";
+  for (const endpoint of candidates) {
+    let resp;
+    try {
+      resp = await fetch("/api/forward", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": "Bearer " + key,
+          "x-upstream-url": endpoint,
+          "x-forward-auth": "1",
+        },
+        signal,
+        body: JSON.stringify({ model: imgModel, prompt, ...(aspectRatio ? { aspect_ratio: String(aspectRatio) } : {}) }),
+      });
+    } catch (e) { lastErr = String((e && e.message) || e); continue; }
+    if (resp.status === 404) { lastErr = "HTTP 404（" + endpoint + " 不存在）"; continue; }
+    if (!resp.ok) throw new Error("生图 API " + resp.status + ": " + (await resp.text()).slice(0, 300));
+    const data = await resp.json().catch(() => ({}));
+    const d = data && data.data;
+    let picUrl = null, b64 = null;
+    if (Array.isArray(d)) {
+      const first = d.find((x) => x && (x.url || x.b64_json)) || {};
+      picUrl = first.url || null;
+      b64 = first.b64_json || null;
+    } else if (d && Array.isArray(d.image_urls)) {
+      picUrl = d.image_urls[0] || null;
+    }
+    if (!picUrl && !b64) {
+      const raw = JSON.stringify(data).slice(0, 200);
+      lastErr = /2013|invalid params|unsupported/i.test(raw)
+        ? "生图接口拒绝了模型 id（" + imgModel + "）：" + raw + " —— 该服务要求单独的图像模型（如 image-01）"
+        : "响应中没有图片: " + raw;
+      continue;
+    }
+    settings.imageApiUrl = endpoint; // 记住可用端点，之后跳过探测
+    saveSettings();
+    if (b64) return { base64: b64, mime: "image/png", width: 0, height: 0, endpoint };
+    const imgResp = await fetchRetry("/api/fetch-image", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: picUrl }),
+    });
+    if (!imgResp.ok) throw new Error("下载生成图片失败: HTTP " + imgResp.status + " " + (await imgResp.text()).slice(0, 200));
+    const imgData = await imgResp.json();
+    return { base64: imgData.base64 || "", mime: imgData.mime || "image/png", width: Number(imgData.width) || 0, height: Number(imgData.height) || 0, endpoint };
+  }
+  throw new Error("生图端点不可用（尝试了 " + candidates.join("、") + "）：" + lastErr);
+}
+
 async function generateImage({ prompt, aspect_ratio }) {
-  const body = { model: settings.imageModel || settings.model, prompt: String(prompt || "") };
-  if (aspect_ratio) body.aspect_ratio = String(aspect_ratio);
-  const resp = await forwardTo(imageUrl(), {
-    headers: {
-      "content-type": "application/json",
-      "authorization": "Bearer " + settings.apiKey,
-      "x-forward-auth": "1",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) throw new Error("生图 API " + resp.status + ": " + (await resp.text()).slice(0, 300));
-  const data = await resp.json();
-  const urls = (data && data.data && data.data.image_urls) || [];
-  if (!urls.length) throw new Error("生图响应中没有图片: " + JSON.stringify(data).slice(0, 200));
-  // 服务端整体下载（不再经 WebView 流式管道），失败时有明确错误且可重试
-  const imgResp = await fetchRetry("/api/fetch-image", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url: urls[0] }),
-  });
-  if (!imgResp.ok) throw new Error("下载生成图片失败: HTTP " + imgResp.status + " " + (await imgResp.text()).slice(0, 200));
-  const imgData = await imgResp.json();
-  const base64 = imgData.base64 || "";
+  const r = await requestImageGen(String(prompt || ""), settings.upstreamBase, settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio);
+  const base64 = r.base64;
   if (!base64) throw new Error("图片数据为空");
-  const mime = (imgData.mime || "image/png").toLowerCase();
+  const mime = (r.mime || "image/png").toLowerCase();
   const id = "img" + (++imgCounter);
   imageCache[id] = base64;
   imageMime[id] = mime.includes("jpeg") ? "image/jpeg" : "image/png";
-  const w = Number(imgData.width) || 0, h = Number(imgData.height) || 0;
+  const w = r.width || 0, h = r.height || 0;
   const result = { ok: true, imageId: id, fileType: imageMime[id], byteSize: Math.round(base64.length * 0.75) };
   if (w && h) {
     result.pixelSize = w + "x" + h;
@@ -595,11 +635,6 @@ function chatTarget(base, format) {
 
 /* 生图端点派生：与聊天共用上游 Base，路径一般为 /v1/image_generation（MiniMax 风格的
  * /anthropic 前缀会剥掉）；生图模型默认沿用聊天模型。非标准服务商仍可用旧字段覆盖。 */
-function imageUrl(base) {
-  const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
-  return settings.imageApiUrl || root + "/v1/image_generation";
-}
-
 async function callApi(body, signal) {
   const format = settings.apiFormat || "messages";
   const target = chatTarget(settings.upstreamBase, format);
@@ -1012,28 +1047,7 @@ async function runSettingsTest() {
   const imgTest = (async () => {
     const imgModel = $("setImageModel").value.trim();
     if (!imgModel) throw new Error("请填写生图模型");
-    const resp = await fetch("/api/forward", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "authorization": "Bearer " + key,
-        "x-upstream-url": imageUrl(upstream),
-        "x-forward-auth": "1",
-      },
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({
-        model: imgModel,
-        prompt: "连通测试：一枚简单的橙色五角星，扁平风格",
-      }),
-    });
-    if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
-    const data = await resp.json();
-    const urls = (data.data && data.data.image_urls) || [];
-    if (!urls.length) {
-      const raw = JSON.stringify(data).slice(0, 140);
-      if (/2013|invalid params|unsupported/i.test(raw)) throw new Error("生图接口拒绝了模型 id（" + imgModel + "）：" + raw + " —— 该服务要求单独的图像模型（如 image-01），请在「生图模型（可选）」里填写");
-      throw new Error("响应中没有图片: " + raw);
-    }
+    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", upstream, key, imgModel, AbortSignal.timeout(45000));
     return "✅ 生图可用：返回图片正常";
   })();
 

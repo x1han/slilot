@@ -92,7 +92,7 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 
 - **Test** runs three checks in parallel — **chat / vision / image generation** — and all three must pass before **Save** unlocks (any field change requires re-testing). Vision review needs a model that accepts image input. The built-in defaults are example placeholders (api.example.com) — replace them with your provider in settings before testing.
-- Image generation reuses your upstream base automatically (`<base>/v1/image_generation`) and the same model id as chat. The image model id is separate from the text model (e.g. MiniMax needs `image-01`) — fill both 文本模型 and 生图模型 in the settings dialog; all three tests must pass before saving.
+- Image generation reuses your upstream base automatically (`<base>/v1/image_generation`) and the same model id as chat. Image generation auto-probes two common endpoints (`<base>/v1/image_generation` MiniMax-style first, then `<base>/v1/images/generations` OpenAI-style; the working one is remembered). The image model id is separate from the text model (e.g. MiniMax needs `image-01`) — fill both 文本模型 and 生图模型 in the settings dialog; all three tests must pass before saving.
 
 Then just describe what you want, for example:
 
