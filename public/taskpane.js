@@ -130,6 +130,8 @@ function applyLang() {
   try {
     document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.getAttribute("data-i18n")); });
     document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.getAttribute("data-i18n-ph")); });
+    const lb = $("setUiLang"); // 按钮显示“另一种语言”：中文界面显示 EN，英文界面显示 中文
+    if (lb) lb.textContent = settings.uiLang === "en" ? "中文" : "EN";
     setBusy(busy);
     updateSaveState();
   } catch (e) {}
