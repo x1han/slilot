@@ -194,7 +194,7 @@ function systemPrompt() {
     "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image 精确插入本页）→ style_text 统一风格。",
     "- add_image 的 width/height 是「边界框」：服务端会按原图宽高比 contain 缩放并在框内居中，永远不会拉伸变形。给框时尽量让框的比例接近 generate_image 返回的 aspect；若在意精确落位，读返回的 placed（实际放置矩形）确认。",
     "- 注意：新建演示文稿的初始页自带版式占位符（标题/副标题框）。占位符无法删除/移动——不要浪费轮次去删它（delete_shape 会自动安全降级）；封面标题建议直接对标题占位符 set_shape_text 写入内容加以利用。",
-    "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图，结合几何公式检查重叠/文字溢出/越界/美观，发现问题当场修复（调坐标、调字号、删了重摆），修复后重新 review_slide 确认通过，才能进入下一页。",
+    "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图与数值自检 warnings。warnings 里的每一条（文本截断/溢出/越界）都必须用工具修复（加宽文本框、缩小字号、精简文字、移回画布内），并重新 review 直至 warnings 清零；同时结合截图检查重叠与美观。未清零不得进入下一页。",
     "- 相互独立的操作尽量并行调用（一轮多个工具）。",
     "- 大段数据表格：用多个 add_textbox 网格化搭建，注意列对齐（同一列 x 相同、行高一致）。",
     "",
@@ -206,7 +206,7 @@ function systemPrompt() {
     "- 大数字（60-72pt）特例：所需宽 ≈ 字符数 × 0.6 × 字号（中文单位按 1×字号），先算宽再定框宽；大数字与下方标签的垂直间距 ≥ 0.6×字号，否则必然压字。",
     "",
     "### 3) Review（审查与修复，必做）",
-    "- 全部页面完成后：screenshot_slides → 对每一页依次 review_slide 真实查看渲染截图（重叠/溢出/越界用几何公式计算，美观用眼睛判断）：",
+    "- 全部页面完成后：screenshot_slides → 对每一页（0 到 页数-1，一页不落）依次 review_slide：确认截图无问题且该页 warnings 为空。跳过任何一页、或任何页面的 warnings 未清零，都不得宣布完成：",
     "  a) 元素越界画布、相互重叠、相互遮挡；",
     "  b) 图片与该页内容是否匹配；图片是否被压扁/拉长变形（对比 generate_image 返回的 aspect 与截图中图形外观）、是否过小看不清、是否遮挡文字；",
     "  c) 文字是否溢出文本框、字号层级是否清晰（页标题 ≥28pt，正文 14-18pt）；",
@@ -594,6 +594,61 @@ async function screenshotSlides(_input, signal) {
   return { ok: true, count: shots.count, note: "逐页截图已生成并缓存（当前打开的演示文稿）。用 review_slide({index}) 查看某页的真实渲染效果。" };
 }
 
+/* 数值自检：对指定页每个文本形状估算所需宽高并对照框尺寸/画布边界，返回可读 warnings。
+ * 这是确定性检查（不依赖模型视觉），专治截图审查容易漏掉的单字截断、溢出、越界。 */
+async function auditSlideShapes(index) {
+  try {
+    return await PowerPoint.run(async (ctx) => {
+      const slide = ctx.presentation.slides.getItemAt(Math.max(0, Math.floor(Number(index) || 0)));
+      const shapes = slide.shapes;
+      shapes.load("items");
+      await ctx.sync();
+      for (const sh of shapes.items) {
+        sh.load("left,top,width,height,name");
+        try {
+          sh.textFrame.textRange.load("text");
+          sh.textFrame.textRange.font.load("size");
+        } catch (e) {}
+      }
+      try { await ctx.sync(); } catch (e) {}
+      const out = [];
+      for (let i = 0; i < shapes.items.length; i++) {
+        const sh = shapes.items[i];
+        const text = safe(() => sh.textFrame.textRange.text);
+        if (text == null || !String(text).trim()) continue;
+        const L = safe(() => sh.left), T = safe(() => sh.top);
+        const W = safe(() => sh.width), H = safe(() => sh.height);
+        if (L == null || W == null) continue;
+        const fs = safe(() => sh.textFrame.textRange.font.size) || 18;
+        const name = (safe(() => sh.name) || "shapes[" + i + "]") + "（" + String(text).replace(/\s+/g, " ").slice(0, 16) + (String(text).length > 16 ? "…" : "") + "）";
+        // 估宽：CJK/全角 ≈ 1×字号，其余 ≈ 0.55×字号；按显式换行分段取最长行
+        let maxLine = 0, totalLines = 0;
+        for (const seg of String(text).split(/\r?\n/)) {
+          let est = 0;
+          for (const ch of seg) est += /[\u2E80-\u9FFF\uF900-\uFAFF\uFF01-\uFF5E\u3000-\u303F]/.test(ch) ? fs : fs * 0.55;
+          maxLine = Math.max(maxLine, est);
+          totalLines += Math.max(1, Math.ceil(est / Math.max(20, W || 20)));
+        }
+        if (maxLine > W * 1.05) {
+          out.push(name + "：文本行估宽约 " + Math.round(maxLine) + "pt 超出框宽 " + Math.round(W) + "pt——若未自动换行会被截断，请加宽文本框、缩小字号或精简文字");
+        }
+        if (H != null) {
+          const needH = totalLines * fs * 1.35;
+          if (needH > H * 1.08) {
+            out.push(name + "：文本估高约 " + Math.round(needH) + "pt 超出框高 " + Math.round(H) + "pt，可能溢出——请加高文本框、缩小字号或精简文字");
+          }
+        }
+        if (T != null && (L < -2 || T < -2 || L + W > canvas.w + 2 || T + H > canvas.h + 2)) {
+          out.push(name + "：元素越界画布（left " + Math.round(L) + ", top " + Math.round(T) + ", 右缘 " + Math.round(L + W) + ", 下缘 " + Math.round(T + H) + "；画布 " + canvas.w + "x" + canvas.h + "）——请移回画布内");
+        }
+      }
+      return out;
+    });
+  } catch (e) {
+    return []; // 自检失败不阻塞 review，截图审查仍在
+  }
+}
+
 async function reviewSlide({ index }) {
   if (!slideShots || slideShots.docVersion !== docVersion) await exportSlidesForReview();
   const i = Number(index);
@@ -603,10 +658,18 @@ async function reviewSlide({ index }) {
     if (!total) throw new Error("当前演示文稿导出为 0 页：可能还没建页，或 PowerPoint 里打开的不是目标文稿。请先用 add_slides 建页，再 screenshot_slides。");
     throw new Error("index 超界：当前共 " + total + " 页（0-" + (total - 1) + "），收到 " + i + "。若刚建了新页请先 screenshot_slides 刷新缓存再 review。");
   }
+  const warnings = await auditSlideShapes(i);
+  let note = "这是该页的真实渲染截图。请以设计师视角认真审查：元素重叠、文字溢出、对齐、配色、图文匹配。发现问题先用相应工具修复，然后重新 screenshot_slides + review_slide 确认。";
+  if (warnings.length) {
+    note += "\n\n⚠ 数值自检发现 " + warnings.length + " 个疑似问题（每条都必须用工具修复，并重新 review 直至清零，未清零不得进入下一页或宣布完成）：\n- " + warnings.join("\n- ");
+  } else {
+    note += "\n（数值自检：未发现文本溢出或越界。）";
+  }
   return {
     __images: [{ media_type: "image/jpeg", base64: img.base64 }],
     slideIndex: i,
-    note: "这是该页的真实渲染截图。请以设计师视角认真审查：元素重叠、文字溢出、对齐、配色、图文匹配。发现问题先用相应工具修复，然后重新 screenshot_slides + review_slide 确认。",
+    warnings,
+    note,
   };
 }
 
