@@ -1,168 +1,180 @@
+**English** | [简体中文](./README.zh-CN.md)
+
 <div align="center">
 
 <img src="public/icons/icon.svg" width="112" alt="Slilot logo"/>
 
 # Slilot
 
-**自托管的 PowerPoint AI 助手 —— 对话即改稿，直接读写你当前打开的演示文稿**
+**A self-hosted PowerPoint AI Agent add-in — chat, and it edits the presentation you have open**
 
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerPoint%20%E6%A1%8C%E9%9D%A2%E7%89%88-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerPoint%20desktop-blue)
 ![Node](https://img.shields.io/badge/Node.js-%E2%89%A5%2018-green)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-pilot--release-orange)
 ![PRs](https://img.shields.io/badge/PRs-welcome-orange)
 
-在 PowerPoint 侧边栏里用自然语言对话，模型直接在**当前打开的演示文稿**上建页、写文本、生成并插入配图，再逐页截图自检修复。
-整个插件跑在你自己的电脑上，接你自己选的大模型服务，文档与 API Key 都不出本机。
+Slilot is a **PowerPoint AI Agent add-in** (pilot release): in a sidebar chat, the model
+directly builds and edits your currently open presentation — slides, text, tables, and
+generated illustrations — then reviews its own work from real per-slide screenshots.
+It runs entirely on your machine against the LLM provider of your choice; your
+documents and API keys never leave it.
 
-<!-- TODO: 录一段 10 秒演示动图（对话 → 实时改稿）放到 docs/demo.gif，取消下行注释
-![演示](docs/demo.gif)
+<!-- TODO: record a 10-second demo GIF (chat → live edit) into docs/demo.gif, then uncomment
+![Demo](docs/demo.gif)
 -->
 
 </div>
 
-## 特性
+## Features
 
-- **实时读写文档本体**：模型通过 Office.js / PowerPoint COM 直接操作打开的演示文稿，改的就是文件本身，全程可在 PowerPoint 里撤销、保存
-- **11 个精细工具**：读概览 / 读某页 / 改文本 / 改样式 / 插文本框 / 加页 / 删形状 / 生图 / 插图 / 截图 / 逐页视觉审查
-- **真实截图审查（RIP 循环）**：每页做完自动用 PowerPoint 渲染成截图让模型"亲眼看"，检查重叠、溢出、变形、风格一致性后当场修复，而不是纯公式脑补
-- **插图不变形**：模型给的是摆放区域，插图按原图宽高比等比缩放并在区域内居中
-- **上游随便换**：面板统一 Anthropic 工具协议，本地服务内置翻译层，接任意提供 `/v1/messages`、`/v1/responses` 或 `/v1/chat/completions` 的服务商，不绑定任何厂商
-- **上下文自动管理**：长任务超限时自动把最早的工具明细折叠成交接摘要，关键数据（面积、台数、负责人）保留，任务不中断
+- **Edits the live document**: the model drives Office.js / PowerPoint COM to operate on the open presentation — changes land in the real file, fully undoable and savable in PowerPoint
+- **11 fine-grained tools**: read overview / read slide / edit text / style text / add textbox / add slides / delete shape / generate image / insert image / screenshot / per-slide visual review
+- **Real screenshot review (RIP loop)**: after each slide, the add-in renders it to an image so the model can actually *look* at the result — checking overlap, overflow, distortion, style consistency — and fix issues on the spot
+- **No distorted images**: the model specifies a placement box; the add-in scales the picture to its true aspect ratio and centers it inside the box
+- **Bring your own model**: the panel speaks the Anthropic tool protocol; a local translation layer bridges any provider offering `/v1/messages`, `/v1/responses`, or `/v1/chat/completions` — no vendor lock-in
+- **Long tasks survive**: context over a threshold is auto-summarized into a handoff note (key data preserved), screenshots pruned to the latest one, with a hard stop as backstop
 
-## 前置条件
+## Prerequisites
 
-| 项 | 要求 |
+| Item | Requirement |
 |---|---|
-| 操作系统 | Windows 10 / 11（侧载、COM 渲染、开机脚本均依赖 Windows） |
-| Office | **桌面版 PowerPoint**（Office 2021 / Microsoft 365 已验证）。网页版、Mac 版不支持 |
-| Node.js | ≥ 18（[nodejs.org](https://nodejs.org) 下载 LTS，终端 `node -v` 确认）。零依赖，**无需 npm install** |
-| 模型服务 | 自备任意 LLM API Key（需要生图时该 Key 须开通图像生成） |
-| 管理员权限 | 全程不需要（仅备用共享目录方案例外） |
+| OS | Windows 10 / 11 (sideloading, COM rendering, and the autostart script are Windows-only) |
+| Office | **Desktop PowerPoint** (Office 2021 / Microsoft 365 verified). PowerPoint for the web and Mac are not supported |
+| Node.js | ≥ 18 ([nodejs.org](https://nodejs.org) LTS; check with `node -v`). Zero dependencies — **no npm install needed** |
+| Model service | Your own LLM API key (image generation requires a key with that capability enabled) |
+| Admin rights | Not required (except for the optional shared-catalog fallback) |
 
-## 安装
+## Install
 
-### 方式一（推荐）：让 AI agent 帮你装
+### Option 1 (recommended): let an AI agent install it
 
-把仓库 clone 到本地，对电脑里的 AI agent 说：
+Clone this repository, then tell the AI agent on your computer:
 
-> 给我的 PowerPoint 安装这个插件。
+> Install this add-in for my PowerPoint.
 
-agent 会按仓库里的 README 与脚本依次完成：
+The agent follows the README and scripts to:
 
-1. 检查 Node ≥ 18 与桌面版 PowerPoint；
-2. 运行 `npx office-addin-dev-certs install` 信任 localhost 开发证书（有系统弹窗，选信任）；
-3. 运行 `install-sideload.ps1`（写入 HKCU 开发者注册表，免管理员）；
-4. 启动 `node server.js`，并用 `https://localhost:3010/healthz` 返回 ok 验证；
-5. 可选：在 `autostart-hidden.vbs` 上创建快捷方式，把快捷方式放进启动文件夹（Win+R → `shell:startup`）实现开机自启。
+1. Check Node ≥ 18 and desktop PowerPoint;
+2. Run `npx office-addin-dev-certs install` and trust the localhost dev certificate (a system dialog appears — choose trust);
+3. Run `install-sideload.ps1` (writes the HKCU developer registry, no admin needed);
+4. Start `node server.js` and verify `https://localhost:3010/healthz` returns ok;
+5. Optional: create a shortcut to `autostart-hidden.vbs` and drop the shortcut into the Startup folder (Win+R → `shell:startup`) for autostart.
 
-### 方式二：手动安装
+### Option 2: manual install
 
 ```powershell
-# 1. 信任开发证书（先于服务启动，否则 server.js 会因缺证书直接退出）
+# 1. Trust the dev certificate (must precede the server, or server.js exits immediately)
 npx office-addin-dev-certs install
 
-# 2. 启动本地服务（或双击 start-addin.bat）
+# 2. Start the local service (or double-click start-addin.bat)
 node server.js
 
-# 3. 侧载注册（免管理员），然后重启 PowerPoint
+# 3. Sideload (no admin), then restart PowerPoint
 powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 
-# 4.（可选）开机自启：右键 autostart-hidden.vbs 创建快捷方式，
-#    把快捷方式移入启动文件夹（不要移动 vbs 本身，它按自身位置定位仓库）
+# 4. (Optional) autostart: create a shortcut to autostart-hidden.vbs and move the
+#    shortcut into the Startup folder (do not move the vbs itself — it locates the
+#    repo relative to its own path)
 ```
 
-重启 PowerPoint 后，「开始」选项卡最右侧出现 **Slilot → AI 助手**。
+After restarting PowerPoint, a **Slilot → AI Assistant** button appears at the right end of the Home tab.
 
-## 首次配置
+## First run
 
-打开面板右下角 ⚙，填入你的模型服务信息：
+Open ⚙ in the bottom-right of the pane and fill in your model service:
 
-| 厂商风格 | 上游 Base | 接口格式 |
+| Provider style | Upstream base | Protocol |
 |---|---|---|
-| Anthropic 兼容 | `https://<host>/<anthropic路径>` | Anthropic — /v1/messages |
+| Anthropic-compatible | `https://<host>/<anthropic-path>` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
-| OpenAI Chat（DeepSeek / Moonshot / 智谱等） | `https://<host>` | OpenAI — /v1/chat/completions |
+| OpenAI Chat (DeepSeek / Moonshot / Zhipu, etc.) | `https://<host>` | OpenAI — /v1/chat/completions |
 
-- 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）。识图审查要求模型支持图片输入；默认上游已预置（可在设置中全部替换）。
-- 生图端点默认预置在 `public/taskpane.js` 顶部（`imageApiUrl` / `imageModel`），可让 agent 帮你改成任意生图服务；不需要生图时保持默认即可，但保存仍需生图测试通过。
+- **Test** runs three checks in parallel — **chat / vision / image generation** — and all three must pass before **Save** unlocks (any field change requires re-testing). Vision review needs a model that accepts image input; a default upstream is preset and fully replaceable in settings.
+- The image-generation endpoint is preset at the top of `public/taskpane.js` (`imageApiUrl` / `imageModel`); ask your agent to change it to any image service. Saving still requires the image test to pass.
 
-配置好后直接用中文提需求，例如：
+Then just describe what you want, for example:
 
-> 读完这份 PPT，在最后加一页总结，风格保持一致
-> 给第 1 页生成一张 16:9 封面图，简约风
-> 把第 3 页的三个要点改成 2×3 网格布局，配一张示意图
+> Read this deck and add a closing summary slide in the same style
+> Generate a 16:9 cover image for slide 1, minimal style
+> Turn the three bullets on slide 3 into a 2×3 grid with an illustration
 
-## 工作原理
+## How it works
 
 ```
-PowerPoint 任务窗格 (public/taskpane.html/js)
-    │  同源请求 https://localhost:3010/api/forward（相对地址）
+PowerPoint task pane (public/taskpane.html/js)
+    │  same-origin requests to https://localhost:3010/api/forward (relative URL)
     ▼
-本地服务 server.js (Node ≥ 18, 零依赖, HTTPS + 开发证书)
-    │  通用转发 + 格式翻译（Anthropic ↔ OpenAI 双向）
+Local service server.js (Node ≥ 18, zero dependencies, HTTPS + dev cert)
+    │  generic forwarding + protocol translation (Anthropic ↔ OpenAI, both ways)
     ▼
-任意 https 上游
-    ├─ Anthropic /v1/messages        透传
-    ├─ OpenAI   /v1/responses        请求/响应双向翻译
-    └─ OpenAI   /v1/chat/completions 请求/响应双向翻译
+Any https upstream
+    ├─ Anthropic /v1/messages        passthrough
+    ├─ OpenAI   /v1/responses        request/response translation
+    └─ OpenAI   /v1/chat/completions request/response translation
 ```
 
-- **工具回路**：面板内是统一的 Anthropic 工具协议 Agent 回路，与上游格式解耦；工具经 Office.js（文本、建页、读形状）与 COM（精确插图、整稿截图）两条通道执行。
-- **截图审查**：`scripts/export-slides.ps1` 把当前文稿逐页导出为 JPG，模型逐页查看真实渲染效果后修复问题（占位符删除不了会自动安全降级）。
-- **长任务不爆上下文**：截图只保留最近 1 张；历史超阈值自动折叠最早的工具明细为交接摘要；熔断保护兜底。
+- **Tool loop**: the pane runs an Anthropic-protocol agent loop, decoupled from the upstream format; tools execute through two channels — Office.js (text, slides, reading shapes) and COM (precise image placement, full-deck screenshots).
+- **Screenshot review**: `scripts/export-slides.ps1` exports the open deck slide-by-slide to JPG; the model reviews the real rendered result and fixes problems (layout placeholders that refuse to be deleted degrade safely).
+- **Long tasks don't blow the context**: only the latest screenshot is kept; history over the threshold is folded into a handoff summary; a circuit breaker backstops.
 
 <details>
-<summary>目录结构</summary>
+<summary>Repository layout</summary>
 
-| 文件 | 作用 |
+| File | Purpose |
 |---|---|
-| `manifest.xml` | 标准 Office 加载项清单（TaskPaneApp） |
-| `server.js` | 本地静态服务 + 通用反向代理 + 格式翻译层（端口 3010） |
-| `public/taskpane.*` | 聊天界面、11 个工具实现、设置与三项测试 |
-| `public/blank.pptx` | `add_slides` 的最小模板（insertSlidesFromBase64 用） |
-| `public/office.js 等` | Office.js CDN 失效时的本地兜底副本（微软官方文件） |
-| `scripts/*.ps1` | 截图渲染 / 精确插图 / 图标生成（PowerPoint COM） |
-| `install-*.ps1` | 侧载注册（HKCU 免管理员；备用共享目录方案需管理员） |
-| `autostart-hidden.vbs` | 开机自启（隐藏窗口运行本地服务） |
-| `start-addin.bat` | 手动启动（可见窗口，调试用） |
-| `tests/` | 格式翻译层的手工验证 payload |
-| `logs/` | 诊断日志（面板错误自动回传，已 gitignore） |
+| `manifest.xml` | Standard Office add-in manifest (TaskPaneApp) |
+| `server.js` | Local static server + generic reverse proxy + protocol translation (port 3010) |
+| `public/taskpane.*` | Chat UI, 11 tool implementations, settings with three-way test |
+| `public/blank.pptx` | Minimal template for `add_slides` (insertSlidesFromBase64) |
+| `public/office.js etc.` | Local fallback copies of the Office.js CDN files (official Microsoft files) |
+| `scripts/*.ps1` | Screenshot rendering / precise image insertion / icon generation (PowerPoint COM) |
+| `install-*.ps1` | Sideload registration (HKCU, no admin; optional shared-catalog fallback needs admin) |
+| `autostart-hidden.vbs` | Autostart the local service in a hidden window |
+| `start-addin.bat` | Manual start (visible window, for debugging) |
+| `tests/` | Manual verification payloads for the protocol translation layer |
+| `logs/` | Diagnostic logs (panel errors are reported here, gitignored) |
 
 </details>
 
-## 安全与隐私
+## Security & privacy
 
-- API Key 只保存在本机面板的 localStorage（浏览器存储），**不写入仓库代码、不上传**；本地服务仅内存转发、不落盘、无任何遥测。
-- 你的演示文稿内容只发送到**你自己填写的上游地址**（本地服务强制 https）；换模型就是换服务商。
-- `server.js` 数百行、零依赖，欢迎自行审计；仅监听 `127.0.0.1`，并拒绝跨源请求。
-- 建议使用可信的模型服务商；备用共享目录方案会创建 SMB 共享，装完可执行 `net share addincatalog /delete` 清理。
+- The API key lives only in the pane's localStorage (browser storage) — **never in the repo, never uploaded**; the local service forwards in memory only, writes nothing, no telemetry.
+- Your presentation content is sent only to the upstream you configure (https enforced); switching models means switching providers.
+- `server.js` is a few hundred lines, zero dependencies — audit it yourself; it listens on `127.0.0.1` only and rejects cross-origin requests.
+- Use a reputable model provider; the optional shared-catalog script creates an SMB share — remove it afterwards with `net share addincatalog /delete`.
 
-## 故障排查
+## Troubleshooting
 
-| 现象 | 处理 |
+| Symptom | Fix |
 |---|---|
-| PowerPoint 里没有 Slilot 按钮 | 确认服务在跑（`https://localhost:3010/healthz` 返回 ok）→ 重启 PowerPoint → 仍没有则以管理员运行 `install-shared-catalog-admin.ps1` 后重启 |
-| 面板打不开 / 一直初始化 | 看 `logs/client-log.txt`；多为本地服务没启动或证书未信任 |
-| 测试不通过 | 聊天失败查上游地址 / 格式 / Key；识图失败说明该模型不支持图片输入，换模型；生图失败通常是 Key 未开通图像生成 |
-| 改了代码没生效 | 需重启本地服务，并把面板 × 掉重开；若改了 `manifest.xml`，把其中 `<Version>` 加一位再重启 PowerPoint |
-| 插图 / 截图报 COM 错误 | 确认 PowerPoint 打开的是目标文稿（COM 附着"当前活动演示文稿"）；关闭 PowerPoint 里阻塞的弹窗后重试 |
+| No Slilot button in PowerPoint | Check the service is up (`https://localhost:3010/healthz` returns ok) → restart PowerPoint → still missing: run `install-shared-catalog-admin.ps1` as admin and restart |
+| Pane won't load / stuck initializing | Check `logs/client-log.txt`; usually the local service isn't running or the certificate isn't trusted |
+| Tests fail | Chat: check upstream URL / protocol / key. Vision: the model doesn't accept images — switch models. Image: the key likely lacks image-generation access |
+| Code changes not taking effect | Restart the local service and reopen the pane (×); if `manifest.xml` changed, bump its `<Version>` and restart PowerPoint |
+| COM errors on image/screenshot | Make sure PowerPoint has the target deck open (COM attaches to the active presentation); close any blocking dialogs and retry |
 
-## 卸载
+## Uninstall
 
-- 删除注册表值 `HKCU\Software\Microsoft\Office\16.0\Wef\Developer` 下以清单 Id（`a7f3d9e2-…`）命名的项，重启 PowerPoint 按钮即消失；
-- 删除启动文件夹里的 Slilot 快捷方式，停掉 node 进程；
-- 用过共享目录方案的话，执行 `net share addincatalog /delete` 并删除 `C:\addin-catalog`。
+- Delete the value named after the manifest Id (`a7f3d9e2-…`) under `HKCU\Software\Microsoft\Office\16.0\Wef\Developer`, then restart PowerPoint;
+- Remove the Slilot shortcut from the Startup folder and stop the node process;
+- If you used the shared-catalog option, run `net share addincatalog /delete` and delete `C:\addin-catalog`.
 
-## 能力边界
+## Capability limits
 
-- 仅支持 **Windows 桌面版 PowerPoint**；网页版 / Mac / WPS 不可用。
-- PowerPoint API 覆盖不到的操作（动画、切换、母版设计、SmartArt 内部、图表数据编辑）做不了。
-- 面板会探测宿主 JS 能力并自动裁剪工具集；逐页审查基于真实截图，要求所用模型支持图片输入（设置里可测试）。
+- **Windows desktop PowerPoint only**; PowerPoint for the web / Mac / WPS are not supported.
+- Operations the PowerPoint API doesn't cover (animations, transitions, master design, SmartArt internals, chart data editing) are out of scope.
+- The pane probes host capabilities and trims its toolset automatically; per-slide review uses real screenshots and requires a vision-capable model (testable in settings).
 
-## 许可证
+## License
 
-本项目基于 [MIT](./LICENSE) 发布。
+Released under the [MIT License](./LICENSE).
+
+## Contributors
+
+<a href="https://github.com/x1han"><img src="https://github.com/x1han.png" width="48" alt="x1han"/></a>  
+Built and maintained by [x1han](https://github.com/x1han).
 
 ---
 
-觉得有用的话点个 Star ⭐ ；欢迎提 Issue 与 PR。
+If this is useful, give it a Star ⭐ ; issues and PRs are welcome.
