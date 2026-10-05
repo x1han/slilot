@@ -10,7 +10,8 @@ body {
 
 #hdr {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 10px;
+  /* 右侧多留一截，避开 PowerPoint 任务窗格边缘的折叠箭头 */
+  padding: 8px 22px 8px 10px;
   background: #cf4a2c; color: #fff;
 }
 #hdrTitle { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
