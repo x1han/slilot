@@ -86,8 +86,10 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 | MiniMax（Anthropic 兼容） | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 
-- 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）。识图审查要求模型支持图片输入；内置默认值是示例占位（api.example.com），测试前请在设置中替换为你自己的服务商。
-- 生图端点自动探测（先 `<base>/v1/image_generation`（MiniMax 风格），404 再试 `<base>/v1/images/generations`（OpenAI 标准），成功端点会被记住）；生图模型独立于文本模型（如 MiniMax 需 `image-01`），在设置面板分别填写「文本模型」和「生图模型」。三项测试全部通过才能保存。
+- 设置分两块：**文本模型**（聊天与识图用）填上游 Base / 接口格式 / API Key / 文本模型；**生图模型**（生图用）的 Base 与 API Key 留空时自动沿用文本模型的，生图模型必填（MiniMax 需 `image-01` 这类图像模型 id）。
+- 内置默认值是示例占位（api.example.com / your-model-id），测试前请替换为你自己的服务商。
+- 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）；识图审查要求文本模型支持图片输入。
+- 生图端点自动探测：先 `<base>/v1/image_generation`（MiniMax 风格），404 再试 `<base>/v1/images/generations`（OpenAI 标准），成功端点会被记住。
 
 配置好后直接用中文提需求，例如：
 

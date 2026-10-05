@@ -91,8 +91,10 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 | MiniMax (Anthropic-compatible) | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 
-- **Test** runs three checks in parallel — **chat / vision / image generation** — and all three must pass before **Save** unlocks (any field change requires re-testing). Vision review needs a model that accepts image input. The built-in defaults are example placeholders (api.example.com) — replace them with your provider in settings before testing.
-- Image generation reuses your upstream base automatically (`<base>/v1/image_generation`) and the same model id as chat. Image generation auto-probes two common endpoints (`<base>/v1/image_generation` MiniMax-style first, then `<base>/v1/images/generations` OpenAI-style; the working one is remembered). The image model id is separate from the text model (e.g. MiniMax needs `image-01`) — fill both 文本模型 and 生图模型 in the settings dialog; all three tests must pass before saving.
+- The dialog has two blocks: **文本模型** (text — used for chat & vision): upstream base / protocol / API key / text model; **生图模型** (image): leave 生图 Base and 生图 API Key empty to reuse the text block's, and the image model id is required (MiniMax needs an image model like `image-01`).
+- The built-in defaults are example placeholders (api.example.com / your-model-id) — replace them with your provider before testing.
+- **Test** runs three checks in parallel — **chat / vision / image** — and all three must pass before **Save** unlocks (any field change requires re-testing); vision review needs the text model to accept image input.
+- The image endpoint is auto-probed: `<base>/v1/image_generation` (MiniMax-style) first, then `<base>/v1/images/generations` (OpenAI standard); the working one is remembered.
 
 Then just describe what you want, for example:
 
