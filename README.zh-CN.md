@@ -52,7 +52,7 @@
 agent 会按仓库里的 README 与脚本依次完成：
 
 1. 检查 Node ≥ 18 与桌面版 PowerPoint；
-2. 运行 `npx office-addin-dev-certs install` 信任 localhost 开发证书（有系统弹窗，选信任）；
+2. 运行 `npx office-addin-dev-certs install --days 3650` 信任 localhost 开发证书（有系统弹窗，选信任）。`--days` 很重要：默认有效期只有 30 天；
 3. 运行 `install-sideload.ps1`（写入 HKCU 开发者注册表，免管理员）；
 4. 启动 `node server.js`，并用 `https://localhost:3010/healthz` 返回 ok 验证；
 5. 可选：在 `autostart-hidden.vbs` 上创建快捷方式，把快捷方式放进启动文件夹（Win+R → `shell:startup`）实现开机自启。
@@ -60,8 +60,9 @@ agent 会按仓库里的 README 与脚本依次完成：
 ### 方式二：手动安装
 
 ```powershell
-# 1. 信任开发证书（先于服务启动，否则 server.js 会因缺证书直接退出）
-npx office-addin-dev-certs install
+# 1. 信任开发证书（先于服务启动，否则 server.js 会因缺证书直接退出；
+#    默认有效期只有 30 天，--days 3650 免去每月续期）
+npx office-addin-dev-certs install --days 3650
 
 # 2. 启动本地服务（或双击 start-addin.bat）
 node server.js
@@ -145,6 +146,8 @@ PowerPoint 任务窗格 (public/taskpane.html/js)
 |---|---|
 | PowerPoint 里没有 Slilot 按钮 | 确认服务在跑（`https://localhost:3010/healthz` 返回 ok）→ 重启 PowerPoint → 仍没有则以管理员运行 `install-shared-catalog-admin.ps1` 后重启 |
 | 面板打不开 / 一直初始化 | 看 `logs/client-log.txt`；多为本地服务没启动或证书未信任 |
+| “开始”选项卡启动时没有按钮 | 永久版 Office 2021 开发者侧载的已知限制：命令注册发生在本会话首次打开加载项时——从【加载项】点一次即可。（图标托管在 GitHub Pages，需能访问 x1han.github.io） |
+| 证书过期（面板突然打不开） | 开发证书默认有效期只有 30 天。刷新：`npx office-addin-dev-certs install --days 3650`，然后重启本地服务 |
 | 测试不通过 | 聊天失败查上游地址 / 格式 / Key；识图失败说明该模型不支持图片输入，换模型；生图失败通常是 Key 未开通图像生成 |
 | 改了代码没生效 | 需重启本地服务，并把面板 × 掉重开；若改了 `manifest.xml`，把其中 `<Version>` 加一位再重启 PowerPoint |
 | 插图 / 截图报 COM 错误 | 确认 PowerPoint 打开的是目标文稿（COM 附着"当前活动演示文稿"）；关闭 PowerPoint 里阻塞的弹窗后重试 |

@@ -56,7 +56,7 @@ Clone this repository, then tell the AI agent on your computer:
 The agent follows the README and scripts to:
 
 1. Check Node ≥ 18 and desktop PowerPoint;
-2. Run `npx office-addin-dev-certs install` and trust the localhost dev certificate (a system dialog appears — choose trust);
+2. Run `npx office-addin-dev-certs install --days 3650` and trust the localhost dev certificate (a system dialog appears — choose trust). `--days` matters: the default validity is only 30 days;
 3. Run `install-sideload.ps1` (writes the HKCU developer registry, no admin needed);
 4. Start `node server.js` and verify `https://localhost:3010/healthz` returns ok;
 5. Optional: create a shortcut to `autostart-hidden.vbs` and drop the shortcut into the Startup folder (Win+R → `shell:startup`) for autostart.
@@ -64,8 +64,9 @@ The agent follows the README and scripts to:
 ### Option 2: manual install
 
 ```powershell
-# 1. Trust the dev certificate (must precede the server, or server.js exits immediately)
-npx office-addin-dev-certs install
+# 1. Trust the dev certificate (must precede the server, or server.js exits immediately;
+#    default validity is 30 days — --days 3650 avoids monthly expiry)
+npx office-addin-dev-certs install --days 3650
 
 # 2. Start the local service (or double-click start-addin.bat)
 node server.js
@@ -150,6 +151,8 @@ Any https upstream
 |---|---|
 | No Slilot button in PowerPoint | Check the service is up (`https://localhost:3010/healthz` returns ok) → restart PowerPoint → still missing: run `install-shared-catalog-admin.ps1` as admin and restart |
 | Pane won't load / stuck initializing | Check `logs/client-log.txt`; usually the local service isn't running or the certificate isn't trusted |
+| No Slilot button on the Home tab at startup | Known limitation of developer sideloading on perpetual Office 2021 — ribbon commands register on first launch of each session; click 加载项 once. (Icons are served from GitHub Pages and need internet access to x1han.github.io.) |
+| Certificate expired (pane suddenly won't load) | The dev certificate defaults to 30-day validity. Refresh with `npx office-addin-dev-certs install --days 3650`, then restart the local service |
 | Tests fail | Chat: check upstream URL / protocol / key. Vision: the model doesn't accept images — switch models. Image: the key likely lacks image-generation access |
 | Code changes not taking effect | Restart the local service and reopen the pane (×); if `manifest.xml` changed, bump its `<Version>` and restart PowerPoint |
 | COM errors on image/screenshot | Make sure PowerPoint has the target deck open (COM attaches to the active presentation); close any blocking dialogs and retry |
