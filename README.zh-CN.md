@@ -47,7 +47,7 @@
 
 把仓库 clone 到本地，对电脑里的 AI agent 说：
 
-> 给我的 PowerPoint 安装这个插件。
+> 给我的 PowerPoint 安装这个插件：https://github.com/x1han/slilot
 
 agent 会按仓库里的 README 与脚本依次完成：
 
@@ -164,11 +164,6 @@ PowerPoint 任务窗格 (public/taskpane.html/js)
 ## 许可证
 
 本项目基于 [MIT](./LICENSE) 发布。
-
-## 贡献者
-
-<a href="https://github.com/x1han"><img src="https://github.com/x1han.png" width="48" alt="x1han"/></a>  
-由 [x1han](https://github.com/x1han) 开发与维护。
 
 ---
 

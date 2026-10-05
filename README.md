@@ -51,7 +51,7 @@ documents and API keys never leave it.
 
 Clone this repository, then tell the AI agent on your computer:
 
-> Install this add-in for my PowerPoint.
+> Install this add-in for my PowerPoint: https://github.com/x1han/slilot
 
 The agent follows the README and scripts to:
 
@@ -169,11 +169,6 @@ Any https upstream
 ## License
 
 Released under the [MIT License](./LICENSE).
-
-## Contributors
-
-<a href="https://github.com/x1han"><img src="https://github.com/x1han.png" width="48" alt="x1han"/></a>  
-Built and maintained by [x1han](https://github.com/x1han).
 
 ---
 
