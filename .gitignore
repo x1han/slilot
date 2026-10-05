@@ -22,3 +22,7 @@ public/office-js/
 
 # 本地测试临时目录
 tmp-test/
+
+# 内部审计产物（不公开）
+audit/
+PROJECT_CODE_AUDIT.md

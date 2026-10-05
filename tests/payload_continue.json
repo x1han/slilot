@@ -1,5 +1,5 @@
 {
-  "model": "MiniMax-M3.1-Flash-Preview",
+  "model": "your-model-id",
   "max_tokens": 2000,
   "system": "你是测试助手。",
   "messages": [

@@ -5,13 +5,13 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>a7f3d9e2-6c48-4b1a-9d2f-3e5b7c9a1f84</Id>
-  <Version>1.4.0.0</Version>
+  <Version>1.4.1.0</Version>
   <ProviderName>本地自建</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="Slilot"/>
   <Description DefaultValue="与 AI 对话，实时生成和修改当前演示文稿"/>
-  <IconUrl DefaultValue="https://localhost:3010/icons/icon-32-v2.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3010/icons/icon-80-v2.png"/>
+  <IconUrl DefaultValue="https://localhost:3010/icons/icon-32-v3.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:3010/icons/icon-80-v3.png"/>
   <SupportUrl DefaultValue="https://localhost:3010/taskpane.html"/>
   <AppDomains>
     <AppDomain>https://localhost:3010</AppDomain>
@@ -65,9 +65,9 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon16" DefaultValue="https://localhost:3010/icons/icon-16-v2.png"/>
-        <bt:Image id="Icon32" DefaultValue="https://localhost:3010/icons/icon-32-v2.png"/>
-        <bt:Image id="Icon80" DefaultValue="https://localhost:3010/icons/icon-80-v2.png"/>
+        <bt:Image id="Icon16" DefaultValue="https://localhost:3010/icons/icon-16-v3.png"/>
+        <bt:Image id="Icon32" DefaultValue="https://localhost:3010/icons/icon-32-v3.png"/>
+        <bt:Image id="Icon80" DefaultValue="https://localhost:3010/icons/icon-80-v3.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="TaskpaneUrl" DefaultValue="https://localhost:3010/taskpane.html"/>

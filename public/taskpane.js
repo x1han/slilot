@@ -9,12 +9,12 @@
  * API Key 出于安全不在代码中保存，首次使用在 ⚙ 里粘贴（存本机 localStorage）。
  */
 const DEFAULT_SETTINGS = {
-  upstreamBase: "https://api.minimaxi.com/anthropic",
+  upstreamBase: "https://api.example.com/anthropic",
   apiFormat: "messages",
-  imageApiUrl: "https://api.minimaxi.com/v1/image_generation",
-  imageModel: "image-01",
+  imageApiUrl: "https://api.example.com/v1/image_generation",
+  imageModel: "your-image-model",
   apiKey: "",
-  model: "MiniMax-M3.1-Flash-Preview",
+  model: "your-model-id",
   maxTokens: 16000,
 };
 const LS_KEY = "mm_ppt_settings_v4";
@@ -390,7 +390,7 @@ async function forwardTo(url, opts) {
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
-  const body = { model: settings.imageModel || "image-01", prompt: String(prompt || "") };
+  const body = { model: settings.imageModel || "your-image-model", prompt: String(prompt || "") };
   if (aspect_ratio) body.aspect_ratio = String(aspect_ratio);
   const resp = await forwardTo(settings.imageApiUrl || DEFAULT_SETTINGS.imageApiUrl, {
     headers: {
@@ -1001,7 +1001,7 @@ async function runSettingsTest() {
       },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
-        model: settings.imageModel || "image-01",
+        model: settings.imageModel || "your-image-model",
         prompt: "连通测试：一枚简单的橙色五角星，扁平风格",
       }),
     });

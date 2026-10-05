@@ -90,8 +90,8 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 | OpenAI Chat (DeepSeek / Moonshot / Zhipu, etc.) | `https://<host>` | OpenAI — /v1/chat/completions |
 
-- **Test** runs three checks in parallel — **chat / vision / image generation** — and all three must pass before **Save** unlocks (any field change requires re-testing). Vision review needs a model that accepts image input; a default upstream is preset and fully replaceable in settings.
-- The image-generation endpoint is preset at the top of `public/taskpane.js` (`imageApiUrl` / `imageModel`); ask your agent to change it to any image service. Saving still requires the image test to pass.
+- **Test** runs three checks in parallel — **chat / vision / image generation** — and all three must pass before **Save** unlocks (any field change requires re-testing). Vision review needs a model that accepts image input. The built-in defaults are example placeholders (api.example.com) — replace them with your provider in settings before testing.
+- The image-generation endpoint is configured at the top of `public/taskpane.js` (`imageApiUrl` / `imageModel`, example placeholder) — ask your agent to point it at your image service. Saving still requires the image test to pass.
 
 Then just describe what you want, for example:
 
