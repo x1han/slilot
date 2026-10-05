@@ -83,6 +83,7 @@ const I18N = {
     wrongHost: "⚠ 请在 PowerPoint 中打开此面板",
     officeFail: "office.js 未加载（CDN 与本地回退均失败；检查网络后关闭重开面板）",
     testing: "测试中…（聊天 / 识图 / 生图 三项并行，生图约需 5-15 秒）",
+    testLabelChat: "聊天", testLabelVision: "识图", testLabelImage: "生图",
     testChatOk: "✅ 聊天连通（{f}）：模型 {m} 回复「{r}」",
     testVisionOk: "✅ 识图可用：模型正确识别了截图内容（{r}）",
     testVisionFail: "模型回复「{r}」——该模型可能不支持图片输入，请换支持视觉的模型",
@@ -118,6 +119,7 @@ const I18N = {
     wrongHost: "⚠ Open this pane inside PowerPoint",
     officeFail: "office.js failed to load (both the CDN and the local fallback failed; check the network, close and reopen the pane)",
     testing: "Testing… (chat / vision / image in parallel; image takes ~5-15s)",
+    testLabelChat: "Chat", testLabelVision: "Vision", testLabelImage: "Image",
     testChatOk: "✅ Chat OK ({f}): model {m} replied \"{r}\"",
     testVisionOk: "✅ Vision OK: the model described the screenshot ({r})",
     testVisionFail: "The model replied \"{r}\" — it may not support image input; switch to a vision-capable model",
@@ -1130,7 +1132,29 @@ async function runSettingsTest() {
   const testedSig = currentSignature(); // 记录被测配置：完成时回填，避免竞态绕过保存门槛
   const out = $("setTestResult");
   out.classList.remove("hidden");
-  out.textContent = t("testing");
+  out.textContent = "";
+  // 三条测试各占一行：句首转圈，完成一条更新一条（绿点 = 通过，红点 = 失败）
+  const mkLine = (label) => {
+    const div = document.createElement("div");
+    div.className = "tline";
+    const mark = document.createElement("span");
+    mark.className = "spin";
+    const txt = document.createElement("span");
+    txt.textContent = label;
+    div.appendChild(mark);
+    div.appendChild(txt);
+    out.appendChild(div);
+    return { mark, txt };
+  };
+  const rows = {
+    chat: mkLine(t("testLabelChat")),
+    vision: mkLine(t("testLabelVision")),
+    image: mkLine(t("testLabelImage")),
+  };
+  const settle = (row, ok, text) => {
+    row.mark.className = ok ? "tdot pass" : "tdot fail";
+    row.txt.textContent = text;
+  };
   $("setTest").disabled = true;
   testState = { passed: false, signature: null };
   updateSaveState();
@@ -1209,18 +1233,38 @@ async function runSettingsTest() {
     throw new Error(t("testVisionFail", { r: (text || t("emptyReply")).slice(0, 60) }));
   })();
 
+  chatTest.then(
+    (msg) => settle(rows.chat, true, msg),
+    (e) => settle(rows.chat, false, "❌ " + t("chatFailed") + ((e && e.message) || e))
+  );
+  visionTest.then(
+    (msg) => settle(rows.vision, true, msg),
+    (e) => settle(rows.vision, false, "❌ " + t("visionFailed") + ((e && e.message) || e))
+  );
+  imgTest.then(
+    (msg) => settle(rows.image, true, msg),
+    (e) => settle(rows.image, false, "❌ " + t("imageFailed") + ((e && e.message) || e))
+  );
+
   const [r1, r2, r3] = await Promise.allSettled([chatTest, visionTest, imgTest]);
   const allOk = r1.status === "fulfilled" && r2.status === "fulfilled" && r3.status === "fulfilled";
-  const lines = [
-    r1.status === "fulfilled" ? r1.value : "❌ " + t("chatFailed") + ((r1.reason && r1.reason.message) || r1.reason),
-    r2.status === "fulfilled" ? r2.value : "❌ " + t("visionFailed") + ((r2.reason && r2.reason.message) || r2.reason),
-    r3.status === "fulfilled" ? r3.value : "❌ " + t("imageFailed") + ((r3.reason && r3.reason.message) || r3.reason),
-  ];
-  if (!allOk) lines.push(t("testWarn"));
-  lines.push(t("testMeta", { s: Math.round((Date.now() - t0) / 1000) }));
-  out.textContent = lines.join("\n");
-  log("设置测试: " + lines.slice(0, 3).join(" | ").slice(0, 400));
-  testState = { passed: allOk, signature: currentSignature() };
+  const meta = document.createElement("div");
+  meta.className = "tmeta";
+  meta.textContent = t("testMeta", { s: Math.round((Date.now() - t0) / 1000) });
+  out.appendChild(meta);
+  if (!allOk) {
+    const warn = document.createElement("div");
+    warn.className = "tmeta twarn";
+    warn.textContent = t("testWarn");
+    out.appendChild(warn);
+  }
+  log("设置测试: " + [r1, r2, r3].map((r) => r.status).join("/") + " " + Math.round((Date.now() - t0) / 1000) + "s");
+  // 被测配置签名在测试期间被改动则结果作废（避免把旧结果算到新配置头上）
+  if (testedSig !== currentSignature()) {
+    testState = { passed: false, signature: null };
+  } else {
+    testState = { passed: allOk, signature: testedSig };
+  }
   $("setTest").disabled = false;
   updateSaveState();
 }

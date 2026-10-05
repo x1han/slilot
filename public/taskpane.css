@@ -109,3 +109,16 @@ body {
   margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e4d9cd;
   font-weight: 600; color: #8c3a24; letter-spacing: .5px;
 }
+
+#setTestResult .tline { display: flex; align-items: flex-start; gap: 6px; }
+#setTestResult .spin {
+  width: 10px; height: 10px; margin-top: 2px; flex: none;
+  border: 2px solid #e0d5cb; border-top-color: #cf4a2c; border-radius: 50%;
+  animation: spin360 .8s linear infinite;
+}
+#setTestResult .tdot { width: 8px; height: 8px; margin-top: 3px; flex: none; border-radius: 50%; }
+#setTestResult .tdot.pass { background: #2e9e5b; }
+#setTestResult .tdot.fail { background: #d64541; }
+#setTestResult .tmeta { font-size: 11px; color: #a3968a; }
+#setTestResult .twarn { color: #9c2a1d; }
+@keyframes spin360 { to { transform: rotate(360deg); } }
