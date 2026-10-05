@@ -5,7 +5,7 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>a7f3d9e2-6c48-4b1a-9d2f-3e5b7c9a1f84</Id>
-  <Version>1.4.1.0</Version>
+  <Version>1.4.2.0</Version>
   <ProviderName>本地自建</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="Slilot"/>
@@ -32,6 +32,7 @@
     <Hosts>
       <Host xsi:type="Presentation">
         <DesktopFormFactor>
+          <FunctionFile resid="FunctionsUrl"/>
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <OfficeTab id="TabHome">
               <Group id="mm.Group1">
@@ -71,6 +72,7 @@
       </bt:Images>
       <bt:Urls>
         <bt:Url id="TaskpaneUrl" DefaultValue="https://localhost:3010/taskpane.html"/>
+        <bt:Url id="FunctionsUrl" DefaultValue="https://localhost:3010/functions.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Slilot"/>
