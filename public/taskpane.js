@@ -9,11 +9,12 @@
  * API Key 出于安全不在代码中保存，首次使用在 ⚙ 里粘贴（存本机 localStorage）。
  */
 const DEFAULT_SETTINGS = {
-  upstreamBase: "https://api.example.com",
+  upstreamBase: "", // 必填（设置面板），示例见占位
   apiFormat: "messages",
   apiKey: "",
-  model: "your-model-id",
-  imageBase: "", // 生图上游：留空 = 用文本模型的上游
+  model: "", // 必填（设置面板）
+  imageBase: "",   // 生图上游：留空 = 用文本模型的上游
+  imageFormat: "", // 生图接口风格：留空 = 跟随文本模型（minimax / openai）
   imageKey: "",  // 生图 Key：留空 = 用文本模型的 Key
   imageModel: "", // 必填（设置面板），如 MiniMax 的 image-01
   uiLang: "zh",   // 界面语言：zh（默认）/ en
@@ -55,9 +56,11 @@ const I18N = {
     newChat: "新会话", send: "发送", stop: "停止", settings: "设置",
     inputPh: "描述你想生成或修改的内容…（Enter 发送）", initializing: "正在初始化…",
     sectionText: "文本模型", sectionImage: "生图模型",
-    upstreamBase: "上游 Base（与下方格式拼接成完整地址）", protocol: "接口格式",
+    upstreamBase: "上游 Base（与接口格式拼接成完整地址）", protocol: "接口格式",
     apiKey: "API Key", textModel: "文本模型", imageModel: "生图模型",
     imageBase: "生图 Base（留空 = 用文本模型的上游）", imageKey: "生图 API Key（留空 = 用文本模型的 Key）",
+    imageProtocol: "生图接口格式（留空 = 跟随文本模型）", imgFmtAuto: "自动探测",
+    notConfigured: "未配置模型",
     test: "测试", save: "保存", cancel: "取消",
     hintKey: "Key 只保存在本机浏览器存储中，随请求经本地代理转发。",
     saveOk: "测试通过，可以保存。", saveDirty: "配置已修改，请重新测试后再保存。",
@@ -92,6 +95,8 @@ const I18N = {
     upstreamBase: "Upstream base (joined with the protocol below)", protocol: "Protocol",
     apiKey: "API Key", textModel: "Text model", imageModel: "Image model",
     imageBase: "Image base (empty = use the text one)", imageKey: "Image API key (empty = use the text one)",
+    imageProtocol: "Image protocol (empty = follow the text one)", imgFmtAuto: "Auto-probe",
+    notConfigured: "No model configured",
     test: "Test", save: "Save", cancel: "Cancel",
     hintKey: "The key is stored only in this browser and forwarded via the local proxy.",
     saveOk: "Tests passed — you can save.", saveDirty: "Config changed — re-test before saving.",
@@ -483,11 +488,15 @@ async function forwardTo(url, opts) {
 /* 生图请求：自动适配两类常见端点——MiniMax 风格 /v1/image_generation（返回 data.image_urls）
  * 与 OpenAI 标准 /v1/images/generations（返回 data[].url / b64_json）。按顺序探测，
  * 首个可用端点会写入 settings.imageApiUrl 记住，之后直接使用。返回 { base64, mime, width, height, endpoint }。 */
-async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio) {
+async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio, imgFormat, textFormat) {
   const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
+  const paths = imgFormat === "minimax" ? ["/v1/image_generation"]
+    : imgFormat === "openai" ? ["/v1/images/generations"]
+    : textFormat === "messages" ? ["/v1/image_generation", "/v1/images/generations"]
+    : ["/v1/images/generations", "/v1/image_generation"];
   const candidates = [];
   if (settings.imageApiUrl) candidates.push(settings.imageApiUrl);
-  for (const p of ["/v1/image_generation", "/v1/images/generations"]) {
+  for (const p of paths) {
     const u = root + p;
     if (!candidates.includes(u)) candidates.push(u);
   }
@@ -542,7 +551,7 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
-  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio);
+  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio, settings.imageFormat, settings.apiFormat);
   const base64 = r.base64;
   if (!base64) throw new Error("图片数据为空");
   const mime = (r.mime || "image/png").toLowerCase();
@@ -972,7 +981,8 @@ function detectCaps() {
     capSets = [];
     log("Surface 探测失败: " + String((e && e.message) || e));
   }
-  $("modelName").textContent = (settings.model || DEFAULT_SETTINGS.model) + (settings.imageModel ? " | " + settings.imageModel : "");
+  const parts = [settings.model, settings.imageModel].filter(Boolean);
+  $("modelName").textContent = parts.join(" | ") || t("notConfigured");
 }
 
 /* 事件绑定不依赖宿主初始化，立即执行 */
@@ -1000,7 +1010,7 @@ function wireUI() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("setTest").addEventListener("click", runSettingsTest);
   $("setCancel").addEventListener("click", () => $("settingsDlg").classList.add("hidden"));
-  ["setUpstream", "setFormat", "setKey", "setModel", "setImageBase", "setImageKey", "setImageModel"].forEach((id) => {
+  ["setUpstream", "setFormat", "setKey", "setModel", "setImageBase", "setImageFormat", "setImageKey", "setImageModel"].forEach((id) => {
     $(id).addEventListener("input", updateSaveState);
     $(id).addEventListener("change", updateSaveState);
   });
@@ -1019,6 +1029,7 @@ function wireUI() {
     settings.apiKey = $("setKey").value.trim();
     settings.model = $("setModel").value.trim() || DEFAULT_SETTINGS.model;
     settings.imageBase = $("setImageBase").value.trim();
+    settings.imageFormat = $("setImageFormat").value;
     settings.imageKey = $("setImageKey").value.trim();
     settings.imageModel = $("setImageModel").value.trim();
     saveSettings();
@@ -1082,6 +1093,7 @@ function currentSignature() {
     $("setKey").value.trim(),
     $("setModel").value.trim(),
     $("setImageBase").value.trim(),
+    $("setImageFormat").value,
     $("setImageKey").value.trim(),
     $("setImageModel").value.trim(),
   ]);
@@ -1103,6 +1115,7 @@ function openSettings() {
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
   $("setImageBase").value = settings.imageBase || "";
+  $("setImageFormat").value = settings.imageFormat || "";
   $("setImageKey").value = settings.imageKey || "";
   $("setImageModel").value = settings.imageModel || "";
   updateSaveState();
@@ -1149,7 +1162,7 @@ async function runSettingsTest() {
     const imgKey = $("setImageKey").value.trim() || key;
     const imgModel = $("setImageModel").value.trim();
     if (!imgModel) throw new Error(t("noImageModel"));
-    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000));
+    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000), undefined, $("setImageFormat").value, format);
     return t("testImageOk");
   })();
 

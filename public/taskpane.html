@@ -55,8 +55,8 @@
           <button id="setUiLang" class="langBtn" title="中文 / English">EN</button>
         </div>
         <label class="sSection" data-i18n="sectionText">文本模型</label>
-        <label data-i18n="upstreamBase">上游 Base（与下方格式拼接成完整地址）</label>
-        <input id="setUpstream" type="text"/>
+        <label data-i18n="upstreamBase">上游 Base（与接口格式拼接成完整地址）</label>
+        <input id="setUpstream" type="text" placeholder="https://api.example.com"/>
         <label data-i18n="protocol">接口格式</label>
         <select id="setFormat">
           <option value="messages">Anthropic — /v1/messages</option>
@@ -65,10 +65,16 @@
         <label data-i18n="apiKey">API Key</label>
         <input id="setKey" type="password"/>
         <label data-i18n="textModel">文本模型</label>
-        <input id="setModel" type="text"/>
+        <input id="setModel" type="text" placeholder="your-model-id"/>
         <label class="sSection" data-i18n="sectionImage">生图模型</label>
         <label data-i18n="imageBase">生图 Base（留空 = 用文本模型的上游）</label>
         <input id="setImageBase" type="text" placeholder="https://api.example.com"/>
+        <label data-i18n="imageProtocol">生图接口格式（留空 = 跟随文本模型）</label>
+        <select id="setImageFormat">
+          <option value="" data-i18n="imgFmtAuto">自动探测</option>
+          <option value="minimax">MiniMax — /v1/image_generation</option>
+          <option value="openai">OpenAI — /v1/images/generations</option>
+        </select>
         <label data-i18n="imageKey">生图 API Key（留空 = 用文本模型的 Key）</label>
         <input id="setImageKey" type="password"/>
         <label data-i18n="imageModel">生图模型</label>
