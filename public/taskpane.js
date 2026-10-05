@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   apiFormat: "messages",
   apiKey: "",
   model: "your-model-id",
+  imageModel: "", // 空 = 沿用聊天模型；图像服务要求单独模型 id 时在设置里填（如 MiniMax 的 image-01）
   maxTokens: 16000,
 };
 const LS_KEY = "mm_ppt_settings_v4";
@@ -872,7 +873,7 @@ function wireUI() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("setTest").addEventListener("click", runSettingsTest);
   $("setCancel").addEventListener("click", () => $("settingsDlg").classList.add("hidden"));
-  ["setUpstream", "setFormat", "setKey", "setModel", "setMaxTokens"].forEach((id) => {
+  ["setUpstream", "setFormat", "setKey", "setModel", "setImageModel", "setMaxTokens"].forEach((id) => {
     $(id).addEventListener("input", updateSaveState);
     $(id).addEventListener("change", updateSaveState);
   });
@@ -885,6 +886,7 @@ function wireUI() {
     settings.apiFormat = $("setFormat").value || "messages";
     settings.apiKey = $("setKey").value.trim();
     settings.model = $("setModel").value.trim() || DEFAULT_SETTINGS.model;
+    settings.imageModel = $("setImageModel").value.trim();
     settings.maxTokens = Number($("setMaxTokens").value) || DEFAULT_SETTINGS.maxTokens;
     saveSettings();
     $("settingsDlg").classList.add("hidden");
@@ -945,6 +947,7 @@ function currentSignature() {
     $("setFormat").value,
     $("setKey").value.trim(),
     $("setModel").value.trim(),
+    $("setImageModel").value.trim(),
     $("setMaxTokens").value,
   ]);
 }
@@ -965,6 +968,7 @@ function openSettings() {
   $("setFormat").value = settings.apiFormat || "messages";
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
+  $("setImageModel").value = settings.imageModel || "";
   $("setMaxTokens").value = settings.maxTokens;
   updateSaveState();
   $("settingsDlg").classList.remove("hidden");
@@ -1006,6 +1010,7 @@ async function runSettingsTest() {
   })();
 
   const imgTest = (async () => {
+    const imgModel = $("setImageModel").value.trim() || model;
     const resp = await fetch("/api/forward", {
       method: "POST",
       headers: {
@@ -1016,14 +1021,18 @@ async function runSettingsTest() {
       },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
-        model: settings.imageModel || settings.model,
+        model: imgModel,
         prompt: "连通测试：一枚简单的橙色五角星，扁平风格",
       }),
     });
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
     const data = await resp.json();
     const urls = (data.data && data.data.image_urls) || [];
-    if (!urls.length) throw new Error("响应中没有图片: " + JSON.stringify(data).slice(0, 120));
+    if (!urls.length) {
+      const raw = JSON.stringify(data).slice(0, 140);
+      if (/2013|invalid params|unsupported/i.test(raw)) throw new Error("生图接口拒绝了模型 id（" + imgModel + "）：" + raw + " —— 该服务要求单独的图像模型（如 image-01），请在「生图模型（可选）」里填写");
+      throw new Error("响应中没有图片: " + raw);
+    }
     return "✅ 生图可用：返回图片正常";
   })();
 
@@ -1065,7 +1074,7 @@ async function runSettingsTest() {
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
     const data = await resp.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到/.test(text) && /圆|circle/i.test(text);
+    const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到|不支持/.test(text);
     if (seesImage) return "✅ 识图可用：模型正确识别了截图内容（" + (text || "").slice(0, 50) + "）";
     throw new Error("模型回复「" + (text || "(空)").slice(0, 60) + "」——该模型可能不支持图片输入，请换支持视觉的模型");
   })();
