@@ -1,4 +1,4 @@
-# 侧载注册（免管理员）
+﻿# 侧载注册（免管理员）
 # 官方格式（office-addin-dev-settings / dev-settings-windows.ts）：
 #   键:  HKCU\Software\Microsoft\Office\16.0\Wef\Developer
 #   值名: 清单 <Id>（GUID，无花括号）
@@ -7,7 +7,8 @@
 $ErrorActionPreference = "Stop"
 
 $addinId = "a7f3d9e2-6c48-4b1a-9d2f-3e5b7c9a1f84"
-$manifestPath = "C:\Users\hxsci\ZCodeProject\slilot\manifest.xml"
+# 以脚本所在目录定位清单：仓库放在任何路径都能直接运行
+$manifestPath = Join-Path $PSScriptRoot "manifest.xml"
 
 if (-not (Test-Path $manifestPath)) { throw "找不到清单文件: $manifestPath" }
 

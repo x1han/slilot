@@ -1,10 +1,11 @@
-# 备用方案（需要管理员运行一次）：共享文件夹目录 + 信任目录注册
+﻿# 备用方案（需要管理员运行一次）：共享文件夹目录 + 信任目录注册
 # 适用于「开发者注册表」方式没有生效的情况。
 # 用法：右键"以管理员身份运行"或以管理员打开 PowerShell 执行本文件。
 $ErrorActionPreference = "Stop"
 
 $catalogDir = "C:\addin-catalog"
-$addinDir = "C:\Users\hxsci\ZCodeProject\slilot"
+# 以脚本所在目录定位加载项：仓库放在任何路径都能直接运行
+$addinDir = $PSScriptRoot
 
 if (-not (Test-Path $catalogDir)) { New-Item -ItemType Directory -Path $catalogDir | Out-Null }
 Copy-Item (Join-Path $addinDir "manifest.xml") $catalogDir -Force
