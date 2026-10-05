@@ -1002,8 +1002,8 @@ function wireUI() {
     $(id).addEventListener("input", updateSaveState);
     $(id).addEventListener("change", updateSaveState);
   });
-  $("setUiLang").addEventListener("change", () => {
-    settings.uiLang = $("setUiLang").value;
+  $("setUiLang").addEventListener("click", () => {
+    settings.uiLang = settings.uiLang === "en" ? "zh" : "en";
     saveSettings();
     applyLang();
   });
@@ -1103,7 +1103,6 @@ function openSettings() {
   $("setImageBase").value = settings.imageBase || "";
   $("setImageKey").value = settings.imageKey || "";
   $("setImageModel").value = settings.imageModel || "";
-  $("setUiLang").value = settings.uiLang || "zh";
   updateSaveState();
   $("settingsDlg").classList.remove("hidden");
 }

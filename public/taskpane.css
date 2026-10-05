@@ -70,6 +70,12 @@ body {
   box-shadow: 0 10px 30px rgba(0,0,0,.18);
 }
 .sTitle { font-weight: 700; margin-bottom: 4px; }
+.sTitleRow { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.langBtn {
+  border: 1px solid #d8ccc2; background: #faf8f6; color: #7a6f66;
+  border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+}
+.langBtn:hover { border-color: #cf4a2c; color: #cf4a2c; }
 #settingsCard label { font-size: 11px; color: #7a6f66; margin-top: 4px; }
 #settingsCard input, #settingsCard select {
   border: 1px solid #e0d5cb; border-radius: 7px; padding: 6px 8px; font: inherit; outline: none;

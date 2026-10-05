@@ -50,7 +50,10 @@
 
     <div id="settingsDlg" class="hidden">
       <div id="settingsCard">
-        <div class="sTitle" data-i18n="settings">设置</div>
+        <div class="sTitleRow">
+          <div class="sTitle" data-i18n="settings">设置</div>
+          <button id="setUiLang" class="langBtn" title="中文 / English">EN</button>
+        </div>
         <label class="sSection" data-i18n="sectionText">文本模型</label>
         <label data-i18n="upstreamBase">上游 Base（与下方格式拼接成完整地址）</label>
         <input id="setUpstream" type="text"/>
@@ -70,11 +73,6 @@
         <input id="setImageKey" type="password"/>
         <label data-i18n="imageModel">生图模型</label>
         <input id="setImageModel" type="text"/>
-        <label>界面语言 / UI language</label>
-        <select id="setUiLang">
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
         <div class="sBtns">
           <button id="setTest" class="secondaryBtn" data-i18n="test">测试</button>
           <button id="setSave" class="primaryBtn" data-i18n="save">保存</button>
