@@ -149,6 +149,7 @@ PowerPoint 任务窗格 (public/taskpane.html/js)
 | 面板打不开 / 一直初始化 | 看 `logs/client-log.txt`；多为本地服务没启动或证书未信任 |
 | “开始”选项卡启动时没有按钮 | 永久版 Office 2021 开发者侧载的已知限制：命令注册发生在本会话首次打开加载项时——从【加载项】点一次即可。（图标托管在 GitHub Pages，需能访问 x1han.github.io） |
 | 证书过期（面板突然打不开） | 开发证书默认有效期只有 30 天。刷新：`npx office-addin-dev-certs install --days 3650`，然后重启本地服务 |
+| GitHub 连不上（clone 失败） | 部分网络环境直连 github.com 被阻断——用 SSH clone（`git clone git@github.com:x1han/slilot.git`，需在 GitHub 账号配置 SSH key）或代理。其余环节均不依赖 GitHub：图标/FunctionFile 在 x1han.github.io（可直连）、office.js 有本地回退、模型上游是你自己的服务商 |
 | 测试不通过 | 聊天失败查上游地址 / 格式 / Key；识图失败说明该模型不支持图片输入，换模型；生图失败通常是 Key 未开通图像生成 |
 | 改了代码没生效 | 需重启本地服务，并把面板 × 掉重开；若改了 `manifest.xml`，把其中 `<Version>` 加一位再重启 PowerPoint |
 | 插图 / 截图报 COM 错误 | 确认 PowerPoint 打开的是目标文稿（COM 附着"当前活动演示文稿"）；关闭 PowerPoint 里阻塞的弹窗后重试 |

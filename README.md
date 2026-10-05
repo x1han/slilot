@@ -154,6 +154,7 @@ Any https upstream
 | Pane won't load / stuck initializing | Check `logs/client-log.txt`; usually the local service isn't running or the certificate isn't trusted |
 | No Slilot button on the Home tab at startup | Known limitation of developer sideloading on perpetual Office 2021 — ribbon commands register on first launch of each session; click 加载项 once. (Icons are served from GitHub Pages and need internet access to x1han.github.io.) |
 | Certificate expired (pane suddenly won't load) | The dev certificate defaults to 30-day validity. Refresh with `npx office-addin-dev-certs install --days 3650`, then restart the local service |
+| GitHub unreachable (clone fails) | Direct github.com access is blocked in some networks — use SSH clone (`git clone git@github.com:x1han/slilot.git`, requires an SSH key on your GitHub account) or a proxy. Everything else runs without GitHub: icons/FunctionFile live on x1han.github.io (reachable directly), office.js has a local fallback, and the model upstream is your own provider |
 | Tests fail | Chat: check upstream URL / protocol / key. Vision: the model doesn't accept images — switch models. Image: the key likely lacks image-generation access |
 | Code changes not taking effect | Restart the local service and reopen the pane (×); if `manifest.xml` changed, bump its `<Version>` and restart PowerPoint |
 | COM errors on image/screenshot | Make sure PowerPoint has the target deck open (COM attaches to the active presentation); close any blocking dialogs and retry |
