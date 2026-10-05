@@ -251,7 +251,60 @@ async function handleForward(req, res) {
 /* ---------- 服务端图片下载：生图 CDN 二进制不再经 WebView 的流式代理管道 ----------
  * 此前生图结果的 CDN 下载走 /api/forward 流式转发，中途断流时 res.destroy() 会让
  * WebView 报出无任何信息的 "Failed to fetch"。改为服务端整体下载后返回 base64，
- * 失败时有明确 JSON 错误，且小响应可被客户端安全重试。 */
+ * 失败时有明确 JSON 错误，且小响应可被客户端安全重试。
+ * TLS 说明：部分图片 CDN 的证书链在浏览器可用（AIA 自动补全）但 Node 校验失败，
+ * 表现为 "fetch failed"。因此先按标准校验下载，失败才回退到跳过校验的 https.get——
+ * 该通道只用于公开的生成图片，不含任何凭据，风险可接受。 */
+function httpsGetLoose(urlStr, redirects) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(urlStr); } catch (e) { return reject(new Error("非法 URL")); }
+    if (u.protocol !== "https:") return reject(new Error("仅支持 https"));
+    const req = https.get({
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Slilot/1.0" },
+      rejectUnauthorized: false,
+      timeout: 30000,
+    }, (r) => {
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location && (redirects || 0) < 4) {
+        r.resume();
+        const next = new URL(r.headers.location, u).toString();
+        r.on("end", () => httpsGetLoose(next, (redirects || 0) + 1).then(resolve, reject));
+        return;
+      }
+      const chunks = [];
+      r.on("data", (c) => chunks.push(c));
+      r.on("end", () => resolve({ status: r.statusCode, buf: Buffer.concat(chunks), mime: r.headers["content-type"] || "image/png" }));
+      r.on("error", reject);
+    });
+    req.on("timeout", () => req.destroy(new Error("下载超时")));
+    req.on("error", reject);
+  });
+}
+
+/* 从 PNG/JPEG 字节头解析像素尺寸（零依赖） */
+function imageDims(buf) {
+  try {
+    if (buf.length > 24 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+    }
+    if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+      let off = 2;
+      while (off + 9 < buf.length) {
+        if (buf[off] !== 0xff) { off++; continue; }
+        const m = buf[off + 1];
+        if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+          return { height: buf.readUInt16BE(off + 5), width: buf.readUInt16BE(off + 7) };
+        }
+        if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { off += 2; continue; }
+        off += 2 + buf.readUInt16BE(off + 2);
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function handleFetchImage(req, res) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
@@ -262,21 +315,38 @@ async function handleFetchImage(req, res) {
     res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
     return res.end(JSON.stringify({ error: "缺少或非法的 url（必须 https）" }));
   }
-  let upstream;
+  let buf = null, mime = null, firstCause = "";
   try {
-    upstream = await fetch(url, { signal: AbortSignal.timeout(60000) });
-  } catch (e) {
-    serverLog("fetch-image 失败 " + String(url).slice(0, 120) + ": " + String((e && e.message) || e));
-    res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify({ error: "图片下载失败: " + String((e && e.message) || e) }));
+    const upstream = await fetch(url, {
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Slilot/1.0" },
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!upstream.ok) throw new Error("HTTP " + upstream.status);
+    buf = Buffer.from(await upstream.arrayBuffer());
+    mime = upstream.headers.get("content-type");
+  } catch (e1) {
+    const cause = e1 && e1.cause ? String(e1.cause.code || e1.cause.message) : "";
+    firstCause = cause || String((e1 && e1.message) || e1);
+    serverLog("fetch-image 标准通道失败 " + String(url).slice(0, 120) + ": " + String((e1 && e1.message) || e1) + (cause ? " cause: " + cause : "") + "，尝试宽松 TLS 重试");
+    try {
+      const r2 = await httpsGetLoose(String(url));
+      if (r2.status !== 200) throw new Error("HTTP " + r2.status);
+      buf = r2.buf;
+      mime = r2.mime;
+    } catch (e2) {
+      serverLog("fetch-image 宽松通道也失败 " + String(url).slice(0, 120) + ": " + String((e2 && e2.message) || e2));
+      res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+      return res.end(JSON.stringify({ error: "图片下载失败: " + String((e2 && e2.message) || e2) + "（首次原因: " + firstCause + "）" }));
+    }
   }
-  if (!upstream.ok) {
-    res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify({ error: "图片下载 HTTP " + upstream.status + ": " + String(url).slice(0, 120) }));
-  }
-  const buf = Buffer.from(await upstream.arrayBuffer());
+  const dims = imageDims(buf);
   res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-  res.end(JSON.stringify({ base64: buf.toString("base64"), mime: upstream.headers.get("content-type") || "image/png" }));
+  res.end(JSON.stringify({
+    base64: buf.toString("base64"),
+    mime: mime || "image/png",
+    width: dims ? dims.width : undefined,
+    height: dims ? dims.height : undefined,
+  }));
 }
 
 /* ---------- 幻灯片截图渲染（PowerPoint COM，附着当前活动演示文稿）---------- */
@@ -367,7 +437,7 @@ async function handleInsertImage(req, res) {
           if (err) {
             return reject(new Error(String((err.message || err)).slice(0, 200) + " " + String(stdout || "") + String(stderr || "").slice(0, 300)));
           }
-          resolve();
+          resolve(String(stdout || ""));
         }
       );
     } catch (e) {
@@ -376,9 +446,18 @@ async function handleInsertImage(req, res) {
     }
   }));
   exportLock = run.catch(() => {});
-  await run;
+  const out = await run;
+  // 解析脚本输出的实际放置矩形（脚本按原图比例 contain 缩放，可能与请求框不同）
+  const placed = { left, top, width: width || undefined, height: height || undefined };
+  const m = /PLACED left=([\d.-]+) top=([\d.-]+) width=([\d.-]+) height=([\d.-]+) native=(\d+)x(\d+)px scale=([\d.]+)/.exec(out);
+  if (m) {
+    placed.left = Number(m[1]); placed.top = Number(m[2]);
+    placed.width = Number(m[3]); placed.height = Number(m[4]);
+    placed.native = m[5] + "x" + m[6];
+    placed.scale = Number(m[7]);
+  }
   res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-  res.end(JSON.stringify({ ok: true }));
+  res.end(JSON.stringify({ ok: true, placed }));
 }
 
 function handleStatic(req, res, pathname) {
@@ -437,8 +516,10 @@ const handler = async (req, res) => {
       handleStatic(req, res, url.pathname);
     }
   } catch (e) {
+    const cause = e && e.cause ? String(e.cause.code || e.cause.message) : "";
+    serverLog("请求处理失败 " + req.url + ": " + String((e && e.message) || e) + (cause ? " cause: " + cause : ""));
     if (!res.headersSent) res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
-    try { res.end(JSON.stringify({ error: String((e && e.message) || e) })); } catch (_) {}
+    try { res.end(JSON.stringify({ error: String((e && e.message) || e) + (cause ? "（" + cause + "）" : "") })); } catch (_) {}
   }
 };
 

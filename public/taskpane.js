@@ -89,6 +89,7 @@ function systemPrompt() {
     "",
     "### 2) Implement（逐页实现 + 页内视觉自检，禁止把配图攒到最后统一处理）",
     "- 严格逐页执行：add_slides 建页 → 该页文本/表格（add_textbox 等）→ 该页配图（generate_image 后立刻 add_image 精确插入本页）→ style_text 统一风格。",
+    "- add_image 的 width/height 是「边界框」：服务端会按原图宽高比 contain 缩放并在框内居中，永远不会拉伸变形。给框时尽量让框的比例接近 generate_image 返回的 aspect；若在意精确落位，读返回的 placed（实际放置矩形）确认。",
     "- 注意：新建演示文稿的初始页自带版式占位符（标题/副标题框）。占位符无法删除/移动——不要浪费轮次去删它（delete_shape 会自动安全降级）；封面标题建议直接对标题占位符 set_shape_text 写入内容加以利用。",
     "- 每页元素放完后必须立即做「页内自检」：screenshot_slides 一次 → review_slide({index: 该页}) 查看该页真实渲染截图，结合几何公式检查重叠/文字溢出/越界/美观，发现问题当场修复（调坐标、调字号、删了重摆），修复后重新 review_slide 确认通过，才能进入下一页。",
     "- 相互独立的操作尽量并行调用（一轮多个工具）。",
@@ -104,7 +105,7 @@ function systemPrompt() {
     "### 3) Review（审查与修复，必做）",
     "- 全部页面完成后：screenshot_slides → 对每一页依次 review_slide 真实查看渲染截图（重叠/溢出/越界用几何公式计算，美观用眼睛判断）：",
     "  a) 元素越界画布、相互重叠、相互遮挡；",
-    "  b) 图片与该页内容是否匹配、比例是否协调；",
+    "  b) 图片与该页内容是否匹配；图片是否被压扁/拉长变形（对比 generate_image 返回的 aspect 与截图中图形外观）、是否过小看不清、是否遮挡文字；",
     "  c) 文字是否溢出文本框、字号层级是否清晰（页标题 ≥28pt，正文 14-18pt）；",
     "  d) 页数、页序、内容与 Plan 是否一致；",
     "  e) 风格一致性：全篇是否遵守下方「默认设计系统」（配色 ≤3 色、无装饰线/色条、母题统一、图片风格统一、对齐一致）。",
@@ -417,7 +418,14 @@ async function generateImage({ prompt, aspect_ratio }) {
   const id = "img" + (++imgCounter);
   imageCache[id] = base64;
   imageMime[id] = mime.includes("jpeg") ? "image/jpeg" : "image/png";
-  return { ok: true, imageId: id, fileType: imageMime[id], byteSize: Math.round(base64.length * 0.75), next: "调用 add_image 并传入该 imageId 插入幻灯片" };
+  const w = Number(imgData.width) || 0, h = Number(imgData.height) || 0;
+  const result = { ok: true, imageId: id, fileType: imageMime[id], byteSize: Math.round(base64.length * 0.75) };
+  if (w && h) {
+    result.pixelSize = w + "x" + h;
+    result.aspect = (w / h).toFixed(2) + ":1";
+  }
+  result.next = "调用 add_image 插入幻灯片；width/height 是边界框，插图会按原图比例缩放并在框内居中，不会变形";
+  return result;
 }
 
 /* 截图审查：本地服务经 PowerPoint COM 直接渲染当前打开的演示文稿 */
@@ -528,7 +536,15 @@ async function addImage({ imageId, slideIndex, left, top, width, height }, signa
       signal,
     });
     if (!resp.ok) throw new Error("COM 插图服务 " + resp.status + ": " + (await resp.text()).slice(0, 200));
-    return { ok: true, via: "com-addpicture" };
+    const data = await resp.json();
+    const p = (data && data.placed) || {};
+    const out = { ok: true, via: "com-addpicture" };
+    if (p.width != null) {
+      out.placed = { left: p.left, top: p.top, width: p.width, height: p.height };
+      if (p.native) out.placed.native = p.native;
+      out.note = "已按原图比例 contain 缩放并在框内居中（不会变形）。实际放置见 placed，如与布局意图不符请调整坐标重试。";
+    }
+    return out;
   } catch (e1) {
     if (signal && signal.aborted) throw e1; // 用户已停止：不要再走降级通道插图
     log("COM 插图失败，改用通用 API（将落入当前显示页）: " + String((e1 && e1.message) || e1));
@@ -581,7 +597,7 @@ function chatTarget(base, format) {
 async function callApi(body, signal) {
   const format = settings.apiFormat || "messages";
   const target = chatTarget(settings.upstreamBase, format);
-  const resp = await fetchRetry("/api/forward", {
+  const opts = {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -593,7 +609,15 @@ async function callApi(body, signal) {
     },
     body: JSON.stringify(body),
     signal,
-  });
+  };
+  let resp;
+  for (let i = 1; ; i++) {
+    resp = await fetchRetry("/api/forward", opts, 2);
+    // 本地代理的 502 意味着它到上游的网络层失败（含 cause 说明），通常是瞬时抖动，值得重试
+    if (resp.ok || i >= 3 || ![502, 503, 504].includes(resp.status)) break;
+    if (signal && signal.aborted) break;
+    await new Promise((r) => setTimeout(r, 1200 * i));
+  }
   if (!resp.ok) {
     const t = await resp.text();
     throw new Error("API " + resp.status + ": " + t.slice(0, 400));
