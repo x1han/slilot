@@ -359,10 +359,26 @@ function safe(fn) { try { return fn(); } catch (e) { return null; } }
 
 /* 生图缓存：generate_image 产出 base64，add_image 消费 */
 const imageCache = {};
+const imageMime = {};
 let imgCounter = 0;
 
+/* 网络层瞬时失败重试：WebView 对中断/被掐断的连接统一报 "Failed to fetch"（无任何信息），
+   重试常能恢复。只重试 TypeError（fetch 网络层失败）；HTTP 错误与用户中止不重试。 */
+async function fetchRetry(url, opts, attempts) {
+  const n = Math.max(1, attempts || 3);
+  for (let i = 1; ; i++) {
+    try {
+      return await fetch(url, opts);
+    } catch (e) {
+      const aborted = opts && opts.signal && opts.signal.aborted;
+      if (aborted || i >= n || !(e instanceof TypeError)) throw e;
+      await new Promise((r) => setTimeout(r, 500 * i));
+    }
+  }
+}
+
 async function forwardTo(url, opts) {
-  const resp = await fetch("/api/forward", {
+  return await fetchRetry("/api/forward", {
     method: "POST",
     headers: Object.assign({
       "x-upstream-url": url,
@@ -370,7 +386,6 @@ async function forwardTo(url, opts) {
     }, opts && opts.headers ? opts.headers : {}),
     body: opts && opts.body != null ? opts.body : undefined,
   });
-  return resp;
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
@@ -388,27 +403,28 @@ async function generateImage({ prompt, aspect_ratio }) {
   const data = await resp.json();
   const urls = (data && data.data && data.data.image_urls) || [];
   if (!urls.length) throw new Error("生图响应中没有图片: " + JSON.stringify(data).slice(0, 200));
-  const imgResp = await forwardTo(urls[0], { method: "GET" });
-  if (!imgResp.ok) throw new Error("下载生成图片失败: HTTP " + imgResp.status);
-  const blob = await imgResp.blob();
-  const dataUrl = await new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result));
-    fr.onerror = () => reject(new Error("图片转 base64 失败"));
-    fr.readAsDataURL(blob);
+  // 服务端整体下载（不再经 WebView 流式管道），失败时有明确错误且可重试
+  const imgResp = await fetchRetry("/api/fetch-image", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: urls[0] }),
   });
-  const base64 = dataUrl.split(",")[1] || "";
+  if (!imgResp.ok) throw new Error("下载生成图片失败: HTTP " + imgResp.status + " " + (await imgResp.text()).slice(0, 200));
+  const imgData = await imgResp.json();
+  const base64 = imgData.base64 || "";
   if (!base64) throw new Error("图片数据为空");
+  const mime = (imgData.mime || "image/png").toLowerCase();
   const id = "img" + (++imgCounter);
   imageCache[id] = base64;
-  return { ok: true, imageId: id, fileType: (dataUrl.match(/^data:([^;]+)/) || [])[1] || "image", byteSize: blob.size, next: "调用 add_image 并传入该 imageId 插入幻灯片" };
+  imageMime[id] = mime.includes("jpeg") ? "image/jpeg" : "image/png";
+  return { ok: true, imageId: id, fileType: imageMime[id], byteSize: Math.round(base64.length * 0.75), next: "调用 add_image 并传入该 imageId 插入幻灯片" };
 }
 
 /* 截图审查：本地服务经 PowerPoint COM 直接渲染当前打开的演示文稿 */
 let slideShots = null;
 
 async function exportSlidesForReview(signal) {
-  const resp = await fetch("/api/export-slides", {
+  const resp = await fetchRetry("/api/export-slides", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
@@ -428,8 +444,12 @@ async function screenshotSlides(_input, signal) {
 async function reviewSlide({ index }) {
   if (!slideShots || slideShots.docVersion !== docVersion) await exportSlidesForReview();
   const i = Number(index);
+  const total = (slideShots.images || []).length;
   const img = (slideShots.images || []).find((x) => x.index === i);
-  if (!img) throw new Error("该页截图不存在（index 超界或截图过期，请重新 screenshot_slides）");
+  if (!img) {
+    if (!total) throw new Error("当前演示文稿导出为 0 页：可能还没建页，或 PowerPoint 里打开的不是目标文稿。请先用 add_slides 建页，再 screenshot_slides。");
+    throw new Error("index 超界：当前共 " + total + " 页（0-" + (total - 1) + "），收到 " + i + "。若刚建了新页请先 screenshot_slides 刷新缓存再 review。");
+  }
   return {
     __images: [{ media_type: "image/jpeg", base64: img.base64 }],
     slideIndex: i,
@@ -498,6 +518,7 @@ async function addImage({ imageId, slideIndex, left, top, width, height }, signa
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         image_base64: b64,
+        media_type: imageMime[imageId] || "image/png",
         slide_number: Number(slideIndex) + 1,
         left: Math.round(Number(left) || 0),
         top: Math.round(Number(top) || 0),
@@ -560,7 +581,7 @@ function chatTarget(base, format) {
 async function callApi(body, signal) {
   const format = settings.apiFormat || "messages";
   const target = chatTarget(settings.upstreamBase, format);
-  const resp = await fetch("/api/forward", {
+  const resp = await fetchRetry("/api/forward", {
     method: "POST",
     headers: {
       "content-type": "application/json",

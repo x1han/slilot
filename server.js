@@ -237,12 +237,46 @@ async function handleForward(req, res) {
   if (upstream.body) {
     // 上游断流 / 客户端取消时不允许拖垮整个服务
     const nodeStream = Readable.fromWeb(upstream.body);
-    nodeStream.on("error", () => { try { res.destroy(); } catch (e) {} });
+    nodeStream.on("error", () => {
+      serverLog("上游响应流中断: " + String(target).slice(0, 120));
+      try { res.destroy(); } catch (e) {}
+    });
     res.on("error", () => { try { nodeStream.destroy(); } catch (e) {} });
     nodeStream.pipe(res);
   } else {
     res.end();
   }
+}
+
+/* ---------- 服务端图片下载：生图 CDN 二进制不再经 WebView 的流式代理管道 ----------
+ * 此前生图结果的 CDN 下载走 /api/forward 流式转发，中途断流时 res.destroy() 会让
+ * WebView 报出无任何信息的 "Failed to fetch"。改为服务端整体下载后返回 base64，
+ * 失败时有明确 JSON 错误，且小响应可被客户端安全重试。 */
+async function handleFetchImage(req, res) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  let body;
+  try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch (e) {}
+  const url = body && body.url;
+  if (!url || !/^https:\/\//i.test(url)) {
+    res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ error: "缺少或非法的 url（必须 https）" }));
+  }
+  let upstream;
+  try {
+    upstream = await fetch(url, { signal: AbortSignal.timeout(60000) });
+  } catch (e) {
+    serverLog("fetch-image 失败 " + String(url).slice(0, 120) + ": " + String((e && e.message) || e));
+    res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ error: "图片下载失败: " + String((e && e.message) || e) }));
+  }
+  if (!upstream.ok) {
+    res.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ error: "图片下载 HTTP " + upstream.status + ": " + String(url).slice(0, 120) }));
+  }
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify({ base64: buf.toString("base64"), mime: upstream.headers.get("content-type") || "image/png" }));
 }
 
 /* ---------- 幻灯片截图渲染（PowerPoint COM，附着当前活动演示文稿）---------- */
@@ -381,6 +415,9 @@ const handler = async (req, res) => {
     } else if (url.pathname === "/api/export-slides") {
       // 幻灯片截图：pptx_base64 -> 逐页 PNG base64（PowerPoint COM 渲染）
       await handleExportSlides(req, res);
+    } else if (url.pathname === "/api/fetch-image") {
+      // 服务端下载图片（生图结果的 CDN 地址），返回 base64 + mime
+      await handleFetchImage(req, res);
     } else if (url.pathname === "/api/insert-image") {
       // 精确插图：指定页 + 坐标（PowerPoint COM AddPicture）
       await handleInsertImage(req, res);
@@ -423,6 +460,11 @@ try {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[Slilot] 服务已启动: https://localhost:${PORT}`);
 });
+
+// Node 默认 5 秒就掐断空闲 keep-alive 连接，而 WebView 的连接池会复用更久的连接，
+// 撞上掐断窗口就表现为偶发 "Failed to fetch"。拉长到 65 秒基本消除该竞态。
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
 server.on("error", (e) => {
   console.error("[Slilot] 启动失败:", e.message);
