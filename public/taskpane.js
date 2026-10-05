@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS = {
   imageBase: "", // 生图上游：留空 = 用文本模型的上游
   imageKey: "",  // 生图 Key：留空 = 用文本模型的 Key
   imageModel: "", // 必填（设置面板），如 MiniMax 的 image-01
+  uiLang: "zh",   // 界面语言：zh（默认）/ en
   maxTokens: 16000,
 };
 const LS_KEY = "mm_ppt_settings_v4";
@@ -46,6 +47,93 @@ function saveSettings() {
 
 /* ---------------- UI 基础 ---------------- */
 const $ = (id) => document.getElementById(id);
+
+/* UI 双语：settings.uiLang（zh 默认 / en），设置里切换即时生效。
+ * 模型可见的工具说明与系统提示词不随 UI 语言切换（仅回复语言跟随）。 */
+const I18N = {
+  zh: {
+    newChat: "新会话", send: "发送", stop: "停止", settings: "设置",
+    inputPh: "描述你想生成或修改的内容…（Enter 发送）", initializing: "正在初始化…",
+    sectionText: "文本模型", sectionImage: "生图模型",
+    upstreamBase: "上游 Base（与下方格式拼接成完整地址）", protocol: "接口格式",
+    apiKey: "API Key", textModel: "文本模型", imageModel: "生图模型",
+    imageBase: "生图 Base（留空 = 用文本模型的上游）", imageKey: "生图 API Key（留空 = 用文本模型的 Key）",
+    test: "测试", save: "保存", cancel: "取消",
+    hintKey: "Key 只保存在本机浏览器存储中，随请求经本地代理转发。",
+    saveOk: "测试通过，可以保存。", saveDirty: "配置已修改，请重新测试后再保存。",
+    saveNotTested: "尚未测试：请点「测试」，三项全部通过后才能保存。",
+    noImageModel: "请填写生图模型", stopping: "正在停止…（若正等待 PowerPoint 渲染，需等当前操作返回）",
+    compressing: "上下文压缩中…", roundThinking: "第 {n} 轮 · 思考中…",
+    roundTools: "第 {n} 轮 · 已执行 {c} 个工具 · {name}", stopped: "（已停止）",
+    emptyReply: "(空回复)", noText: "(模型没有返回文本)", interrupted: "[已中断/出错]",
+    historyFull: "⚠ 对话历史已达 {kb} KB（摘要压缩未能生效），继续会超出模型上下文。请点「新会话」开始新任务。",
+    maxRounds: "⚠ 已连续执行 {n} 轮工具，自动暂停。回复「继续」我会接着做。",
+    compacted: "🧹 历史已压缩：最早的工具明细折叠为交接摘要（任务连续性不受影响）。",
+    truncated: "⚠ 输出因 max_tokens 截断，回复「继续」我会接着做。",
+    errPrefix: "出错了: ", errHint: "\n\n常见原因：本地服务没在运行（双击 start-addin.bat）、Key 无效、或网络问题。",
+    wrongHost: "⚠ 请在 PowerPoint 中打开此面板",
+    officeFail: "office.js 未加载（CDN 与本地回退均失败；检查网络后关闭重开面板）",
+    testing: "测试中…（聊天 / 识图 / 生图 三项并行，生图约需 5-15 秒）",
+    testChatOk: "✅ 聊天连通（{f}）：模型 {m} 回复「{r}」",
+    testVisionOk: "✅ 识图可用：模型正确识别了截图内容（{r}）",
+    testVisionFail: "模型回复「{r}」——该模型可能不支持图片输入，请换支持视觉的模型",
+    testImageOk: "✅ 生图可用：返回图片正常",
+    chatFailed: "聊天失败：", visionFailed: "识图失败：", imageFailed: "生图失败：",
+    testWarn: "⚠ 存在不可用项，不能保存。请更换支持全部三项能力的模型（或检查地址 / Key）后重新测试。",
+    testMeta: "（{s} 秒。测试用的是输入框当前值）",
+    imgApiErr: "生图 API {s}: {t}", imgModelRejected: "生图接口拒绝了模型 id（{m}）：{r} —— 该服务要求单独的图像模型（如 image-01）",
+    imgNoImg: "响应中没有图片: {r}", imgDownloadFail: "下载生成图片失败: HTTP {s} {t}",
+    imgEndpointsFail: "生图端点不可用（尝试了 {l}）：{e}", endpoint404: "HTTP 404（{u} 不存在）",
+  },
+  en: {
+    newChat: "New chat", send: "Send", stop: "Stop", settings: "Settings",
+    inputPh: "Describe what to generate or edit… (Enter to send)", initializing: "Initializing…",
+    sectionText: "Text model", sectionImage: "Image model",
+    upstreamBase: "Upstream base (joined with the protocol below)", protocol: "Protocol",
+    apiKey: "API Key", textModel: "Text model", imageModel: "Image model",
+    imageBase: "Image base (empty = use the text one)", imageKey: "Image API key (empty = use the text one)",
+    test: "Test", save: "Save", cancel: "Cancel",
+    hintKey: "The key is stored only in this browser and forwarded via the local proxy.",
+    saveOk: "Tests passed — you can save.", saveDirty: "Config changed — re-test before saving.",
+    saveNotTested: "Not tested: click Test; all three checks must pass before saving.",
+    noImageModel: "Please fill in the image model", stopping: "Stopping… (if waiting on a PowerPoint render, the current operation must return first)",
+    compressing: "Compressing context…", roundThinking: "Round {n} · thinking…",
+    roundTools: "Round {n} · {c} tools done · {name}", stopped: "(stopped)",
+    emptyReply: "(empty response)", noText: "(no text from the model)", interrupted: "[interrupted/errored]",
+    historyFull: "⚠ History reached {kb} KB (summarization failed) — continuing would exceed the model context. Start a new chat.",
+    maxRounds: "⚠ {n} tool rounds reached — paused. Reply \"continue\" and I'll pick up.",
+    compacted: "🧹 History compacted: the oldest tool details were folded into a handoff summary.",
+    truncated: "⚠ Output hit max_tokens — reply \"continue\" and I'll continue.",
+    errPrefix: "Something went wrong: ", errHint: "\n\nCommon causes: the local service isn't running (start-addin.bat), an invalid key, or network issues.",
+    wrongHost: "⚠ Open this pane inside PowerPoint",
+    officeFail: "office.js failed to load (both the CDN and the local fallback failed; check the network, close and reopen the pane)",
+    testing: "Testing… (chat / vision / image in parallel; image takes ~5-15s)",
+    testChatOk: "✅ Chat OK ({f}): model {m} replied \"{r}\"",
+    testVisionOk: "✅ Vision OK: the model described the screenshot ({r})",
+    testVisionFail: "The model replied \"{r}\" — it may not support image input; switch to a vision-capable model",
+    testImageOk: "✅ Image generation OK",
+    chatFailed: "Chat failed: ", visionFailed: "Vision failed: ", imageFailed: "Image failed: ",
+    testWarn: "⚠ Some checks failed — cannot save. Use a model covering all three capabilities (or check the address / key), then re-test.",
+    testMeta: "({s}s. Tested with the values currently in the form)",
+    imgApiErr: "Image API {s}: {t}", imgModelRejected: "The image API rejected the model id ({m}): {r} — this service requires a dedicated image model (e.g. image-01)",
+    imgNoImg: "No image in the response: {r}", imgDownloadFail: "Failed to download the generated image: HTTP {s} {t}",
+    imgEndpointsFail: "Image endpoints unavailable (tried {l}): {e}", endpoint404: "HTTP 404 ({u} not found)",
+  },
+};
+function t(key, params) {
+  const d = I18N[settings.uiLang === "en" ? "en" : "zh"] || I18N.zh;
+  let s = d[key] != null ? d[key] : (I18N.zh[key] != null ? I18N.zh[key] : key);
+  if (params) for (const k in params) s = s.split("{" + k + "}").join(String(params[k]));
+  return s;
+}
+function applyLang() {
+  try {
+    document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.getAttribute("data-i18n")); });
+    document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.getAttribute("data-i18n-ph")); });
+    setBusy(busy);
+    updateSaveState();
+  } catch (e) {}
+}
 function addMsg(kind, text) {
   const div = document.createElement("div");
   div.className = "msg " + kind;
@@ -73,7 +161,7 @@ function setBusy(v) {
   busy = v;
   const btn = $("sendBtn");
   btn.disabled = false;
-  btn.textContent = v ? "停止" : "发送";
+  btn.textContent = v ? t("stop") : t("send");
 }
 
 /* ---------------- 系统提示词 ---------------- */
@@ -122,7 +210,7 @@ function systemPrompt() {
     "- 图片风格统一：所有 generate_image 的提示词都必须以固定风格后缀结尾——「" + THEME.imageStyle + "」，只按页面内容改主体描述，不改风格描述。",
     "",
     "## 通用规则",
-    "- 全程用中文，回复简洁。",
+    "- Reply in " + (settings.uiLang === "en" ? "English" : "中文") + ", keep replies concise.",
     "- slideIndex / shapeIndex 都是 0-based，以工具返回的顺序为准。",
     "- 画布为 " + canvas.w + " x " + canvas.h + " 点(pt)，原点在左上角，x 向右、y 向下，排版勿越界。",
     "- 文字要适合 PPT：短句、要点式，不要长段落。",
@@ -417,8 +505,8 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
         body: JSON.stringify({ model: imgModel, prompt, ...(aspectRatio ? { aspect_ratio: String(aspectRatio) } : {}) }),
       });
     } catch (e) { lastErr = String((e && e.message) || e); continue; }
-    if (resp.status === 404) { lastErr = "HTTP 404（" + endpoint + " 不存在）"; continue; }
-    if (!resp.ok) throw new Error("生图 API " + resp.status + ": " + (await resp.text()).slice(0, 300));
+    if (resp.status === 404) { lastErr = t("endpoint404", { u: endpoint }); continue; }
+    if (!resp.ok) throw new Error(t("imgApiErr", { s: resp.status, t: (await resp.text()).slice(0, 300) }));
     const data = await resp.json().catch(() => ({}));
     const d = data && data.data;
     let picUrl = null, b64 = null;
@@ -432,8 +520,8 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
     if (!picUrl && !b64) {
       const raw = JSON.stringify(data).slice(0, 200);
       lastErr = /2013|invalid params|unsupported/i.test(raw)
-        ? "生图接口拒绝了模型 id（" + imgModel + "）：" + raw + " —— 该服务要求单独的图像模型（如 image-01）"
-        : "响应中没有图片: " + raw;
+        ? t("imgModelRejected", { m: imgModel, r: raw })
+        : t("imgNoImg", { r: raw });
       continue;
     }
     settings.imageApiUrl = endpoint; // 记住可用端点，之后跳过探测
@@ -444,11 +532,11 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ url: picUrl }),
     });
-    if (!imgResp.ok) throw new Error("下载生成图片失败: HTTP " + imgResp.status + " " + (await imgResp.text()).slice(0, 200));
+    if (!imgResp.ok) throw new Error(t("imgDownloadFail", { s: imgResp.status, t: (await imgResp.text()).slice(0, 200) }));
     const imgData = await imgResp.json();
     return { base64: imgData.base64 || "", mime: imgData.mime || "image/png", width: Number(imgData.width) || 0, height: Number(imgData.height) || 0, endpoint };
   }
-  throw new Error("生图端点不可用（尝试了 " + candidates.join("、") + "）：" + lastErr);
+  throw new Error(t("imgEndpointsFail", { l: candidates.join("、"), e: lastErr }));
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
@@ -764,7 +852,7 @@ async function runTurn(userText) {
       const histSize = JSON.stringify(messages).length;
       if (histSize > COMPACT_THRESHOLD && compactionAttempts < 2) {
         compactionAttempts++;
-        setStatus("上下文压缩中…");
+        setStatus(t("compressing"));
         try {
           const before = histSize;
           const folded = await compactHistoryIfNeeded();
@@ -772,7 +860,7 @@ async function runTurn(userText) {
           if (folded) {
             const after = JSON.stringify(messages).length;
             log("上下文压缩: " + before + " -> " + after + " 字符");
-            addMsg("assistant", "🧹 历史已压缩：最早的工具明细折叠为交接摘要（任务连续性不受影响）。");
+            addMsg("assistant", t("compacted"));
           }
         } catch (e) {
           log("上下文压缩失败（跳过）: " + String((e && e.message) || e));
@@ -781,10 +869,10 @@ async function runTurn(userText) {
       // 体积熔断：压缩尝试过仍降不下来（阈值 ×2，约 40-60 万 token）才停止——再大必然超模型上下文
       const afterSize = JSON.stringify(messages).length;
       if (afterSize > COMPACT_THRESHOLD * 2) {
-        addMsg("assistant", "⚠ 对话历史已达 " + Math.round(afterSize / 1024) + " KB（摘要压缩未能生效），继续会超出模型上下文。请点「新会话」开始新任务。");
+        addMsg("assistant", t("historyFull", { kb: Math.round(afterSize / 1024) }));
         return;
       }
-      setStatus("第 " + (round + 1) + " 轮 · 思考中…");
+      setStatus(t("roundThinking", { n: round + 1 }));
       const data = await callApi({
         model: settings.model,
         max_tokens: Number(settings.maxTokens) || 16000,
@@ -793,7 +881,7 @@ async function runTurn(userText) {
         tools: toolDefs(),
       }, myCtrl.signal);
       if (stale()) return;
-      if (!Array.isArray(data.content) || !data.content.length) data.content = [{ type: "text", text: "(空回复)" }];
+      if (!Array.isArray(data.content) || !data.content.length) data.content = [{ type: "text", text: t("emptyReply") }];
 
       messages.push({ role: "assistant", content: data.content });
       const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
@@ -806,7 +894,7 @@ async function runTurn(userText) {
         for (const tu of toolUses) {
           if (stale()) return;
           toolCount++;
-          setStatus("第 " + (round + 1) + " 轮 · 已执行 " + toolCount + " 个工具 · " + tu.name);
+          setStatus(t("roundTools", { n: round + 1, c: toolCount, name: tu.name }));
           let resultPayload;
           try {
             const out = await execTool(tu.name, tu.input, myCtrl.signal);
@@ -837,25 +925,25 @@ async function runTurn(userText) {
       }
 
       // 正常结束
-      let finalText = text || "(模型没有返回文本)";
+      let finalText = text || t("noText");
       if (data.stop_reason === "max_tokens") {
-        finalText += "\n\n⚠ 输出因 max_tokens 截断，回复「继续」我会接着做。";
+        finalText += "\n\n" + t("truncated");
       }
       addMsg("assistant", finalText);
       return;
     }
-    addMsg("assistant", "⚠ 已连续执行 " + MAX_ROUNDS + " 轮工具，自动暂停。回复「继续」我会接着未完成的部分继续做。");
+    addMsg("assistant", t("maxRounds", { n: MAX_ROUNDS }));
   } catch (e) {
     if (stale()) return;
     // 协议修复：历史末尾若悬空 user（含未应答的 tool_result），补一条 assistant 收尾，避免下次请求 400
     const last = messages[messages.length - 1];
     if (last && last.role === "user") {
-      messages.push({ role: "assistant", content: [{ type: "text", text: "[已中断/出错]" }] });
+      messages.push({ role: "assistant", content: [{ type: "text", text: t("interrupted") }] });
     }
     if (e && e.name === "AbortError") {
-      addMsg("assistant", "（已停止）");
+      addMsg("assistant", t("stopped"));
     } else {
-      addMsg("error", "出错了: " + String((e && e.message) || e) + "\n\n常见原因：本地服务没在运行（双击 start-addin.bat）、Key 无效、或网络问题。");
+      addMsg("error", t("errPrefix") + String((e && e.message) || e) + t("errHint"));
     }
   } finally {
     if (!stale()) {
@@ -889,7 +977,7 @@ function detectCaps() {
 function wireUI() {
   $("sendBtn").addEventListener("click", () => {
     if (busy) {
-      if (abortCtrl) { abortCtrl.abort(); setStatus("正在停止…（若正等待 PowerPoint 渲染，需等当前操作返回）"); }
+      if (abortCtrl) { abortCtrl.abort(); setStatus(t("stopping")); }
       return;
     }
     onSend();
@@ -914,6 +1002,11 @@ function wireUI() {
     $(id).addEventListener("input", updateSaveState);
     $(id).addEventListener("change", updateSaveState);
   });
+  $("setUiLang").addEventListener("change", () => {
+    settings.uiLang = $("setUiLang").value;
+    saveSettings();
+    applyLang();
+  });
   $("setSave").addEventListener("click", () => {
     if (!testState.passed || testState.signature !== currentSignature()) {
       updateSaveState();
@@ -934,13 +1027,14 @@ function wireUI() {
 
 function init() {
   wireUI();
+  applyLang();
   // CDN 不可达时本地回退脚本（office.js）加载需要时间：轮询等待 Office 就绪（最多 12 秒），
   // 而不是立即 fatal——否则 CDN 受限的网络下面板永远起不来。
   const t0 = Date.now();
   (function poll() {
     if (typeof Office !== "undefined" && Office.onReady) { startOffice(); return; }
     if (Date.now() - t0 > 12000) {
-      showFatal("office.js 未加载（CDN 与本地回退均失败；检查网络后关闭重开面板）");
+      showFatal(t("officeFail"));
       return;
     }
     setTimeout(poll, 120);
@@ -954,7 +1048,7 @@ function startOffice() {
         const host = (info && info.host) || "";
         log("onReady 触发, host=" + (host || "(空)"));
         if (host && host !== "PowerPoint") {
-          $("modelName").textContent = "⚠ 请在 PowerPoint 中打开此面板";
+          $("modelName").textContent = t("wrongHost");
         }
         detectCaps();
         if (host === "PowerPoint") {
@@ -995,8 +1089,7 @@ function updateSaveState() {
   const ok = testState.passed && testState.signature === currentSignature();
   $("setSave").disabled = !ok;
   const hint = $("saveHint");
-  hint.textContent = ok ? "测试通过，可以保存。"
-    : (testState.passed ? "配置已修改，请重新测试后再保存。" : "尚未测试：请点「测试」，三项全部通过后才能保存。");
+  hint.textContent = ok ? t("saveOk") : (testState.passed ? t("saveDirty") : t("saveNotTested"));
   hint.classList.toggle("warn", !ok);
 }
 
@@ -1010,6 +1103,7 @@ function openSettings() {
   $("setImageBase").value = settings.imageBase || "";
   $("setImageKey").value = settings.imageKey || "";
   $("setImageModel").value = settings.imageModel || "";
+  $("setUiLang").value = settings.uiLang || "zh";
   updateSaveState();
   $("settingsDlg").classList.remove("hidden");
 }
@@ -1022,7 +1116,7 @@ async function runSettingsTest() {
   const testedSig = currentSignature(); // 记录被测配置：完成时回填，避免竞态绕过保存门槛
   const out = $("setTestResult");
   out.classList.remove("hidden");
-  out.textContent = "测试中…（聊天 / 识图 / 生图 三项并行，生图约需 5-15 秒）";
+  out.textContent = t("testing");
   $("setTest").disabled = true;
   testState = { passed: false, signature: null };
   updateSaveState();
@@ -1046,16 +1140,16 @@ async function runSettingsTest() {
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
     const data = await resp.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    return "✅ 聊天连通（" + format + "）：模型 " + (data.model || model) + " 回复「" + ((text || "(空)").slice(0, 30)) + "」";
+    return t("testChatOk", { f: format, m: data.model || model, r: (text || t("emptyReply")).slice(0, 30) });
   })();
 
   const imgTest = (async () => {
     const imgBase = $("setImageBase").value.trim() || upstream;
     const imgKey = $("setImageKey").value.trim() || key;
     const imgModel = $("setImageModel").value.trim();
-    if (!imgModel) throw new Error("请填写生图模型");
+    if (!imgModel) throw new Error(t("noImageModel"));
     await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000));
-    return "✅ 生图可用：返回图片正常";
+    return t("testImageOk");
   })();
 
   const visionTest = (async () => {
@@ -1097,19 +1191,19 @@ async function runSettingsTest() {
     const data = await resp.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
     const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到|不支持/.test(text);
-    if (seesImage) return "✅ 识图可用：模型正确识别了截图内容（" + (text || "").slice(0, 50) + "）";
-    throw new Error("模型回复「" + (text || "(空)").slice(0, 60) + "」——该模型可能不支持图片输入，请换支持视觉的模型");
+    if (seesImage) return t("testVisionOk", { r: (text || "").slice(0, 50) });
+    throw new Error(t("testVisionFail", { r: (text || t("emptyReply")).slice(0, 60) }));
   })();
 
   const [r1, r2, r3] = await Promise.allSettled([chatTest, visionTest, imgTest]);
   const allOk = r1.status === "fulfilled" && r2.status === "fulfilled" && r3.status === "fulfilled";
   const lines = [
-    r1.status === "fulfilled" ? r1.value : "❌ 聊天失败：" + ((r1.reason && r1.reason.message) || r1.reason),
-    r2.status === "fulfilled" ? r2.value : "❌ 识图失败：" + ((r2.reason && r2.reason.message) || r2.reason),
-    r3.status === "fulfilled" ? r3.value : "❌ 生图失败：" + ((r3.reason && r3.reason.message) || r3.reason),
+    r1.status === "fulfilled" ? r1.value : "❌ " + t("chatFailed") + ((r1.reason && r1.reason.message) || r1.reason),
+    r2.status === "fulfilled" ? r2.value : "❌ " + t("visionFailed") + ((r2.reason && r2.reason.message) || r2.reason),
+    r3.status === "fulfilled" ? r3.value : "❌ " + t("imageFailed") + ((r3.reason && r3.reason.message) || r3.reason),
   ];
-  if (!allOk) lines.push("⚠ 存在不可用项，不能保存。请更换支持全部三项能力的模型（或检查地址 / Key）后重新测试。");
-  lines.push("（" + Math.round((Date.now() - t0) / 1000) + " 秒。测试用的是输入框当前值）");
+  if (!allOk) lines.push(t("testWarn"));
+  lines.push(t("testMeta", { s: Math.round((Date.now() - t0) / 1000) }));
   out.textContent = lines.join("\n");
   log("设置测试: " + lines.slice(0, 3).join(" | ").slice(0, 400));
   testState = { passed: allOk, signature: currentSignature() };

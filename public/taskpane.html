@@ -32,7 +32,7 @@
         <span class="dot"></span> Slilot
       </div>
       <div id="hdrBtns">
-        <button id="newChatBtn" class="ghostBtn" title="清空对话">新会话</button>
+        <button id="newChatBtn" class="ghostBtn" title="清空对话" data-i18n="newChat">新会话</button>
         <button id="settingsBtn" class="ghostBtn" title="设置">⚙</button>
       </div>
     </div>
@@ -41,43 +41,48 @@
 
     <div id="statusbar" class="hidden"></div>
 
-    <div id="modelBar"><span id="modelName">正在初始化…</span></div>
+    <div id="modelBar"><span id="modelName" data-i18n="initializing">正在初始化…</span></div>
 
     <div id="inputBar">
-      <textarea id="input" rows="2" placeholder="描述你想生成或修改的内容…（Enter 发送）"></textarea>
-      <button id="sendBtn">发送</button>
+      <textarea id="input" rows="2" placeholder="描述你想生成或修改的内容…（Enter 发送）" data-i18n-ph="inputPh"></textarea>
+      <button id="sendBtn" data-i18n="send">发送</button>
     </div>
 
     <div id="settingsDlg" class="hidden">
       <div id="settingsCard">
-        <div class="sTitle">设置</div>
-        <label class="sSection">文本模型</label>
-        <label>上游 Base（与下方格式拼接成完整地址）</label>
+        <div class="sTitle" data-i18n="settings">设置</div>
+        <label class="sSection" data-i18n="sectionText">文本模型</label>
+        <label data-i18n="upstreamBase">上游 Base（与下方格式拼接成完整地址）</label>
         <input id="setUpstream" type="text"/>
-        <label>接口格式</label>
+        <label data-i18n="protocol">接口格式</label>
         <select id="setFormat">
           <option value="messages">Anthropic — /v1/messages</option>
           <option value="responses">OpenAI — /v1/responses</option>
           </select>
-        <label>API Key</label>
+        <label data-i18n="apiKey">API Key</label>
         <input id="setKey" type="password"/>
-        <label>文本模型</label>
+        <label data-i18n="textModel">文本模型</label>
         <input id="setModel" type="text"/>
-        <label class="sSection">生图模型</label>
-        <label>生图 Base（留空 = 用文本模型的上游）</label>
+        <label class="sSection" data-i18n="sectionImage">生图模型</label>
+        <label data-i18n="imageBase">生图 Base（留空 = 用文本模型的上游）</label>
         <input id="setImageBase" type="text"/>
-        <label>生图 API Key（留空 = 用文本模型的 Key）</label>
+        <label data-i18n="imageKey">生图 API Key（留空 = 用文本模型的 Key）</label>
         <input id="setImageKey" type="password"/>
-        <label>生图模型</label>
+        <label data-i18n="imageModel">生图模型</label>
         <input id="setImageModel" type="text"/>
+        <label>界面语言 / UI language</label>
+        <select id="setUiLang">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
         <div class="sBtns">
-          <button id="setTest" class="secondaryBtn">测试</button>
-          <button id="setSave" class="primaryBtn">保存</button>
-          <button id="setCancel" class="cancelBtn">取消</button>
+          <button id="setTest" class="secondaryBtn" data-i18n="test">测试</button>
+          <button id="setSave" class="primaryBtn" data-i18n="save">保存</button>
+          <button id="setCancel" class="cancelBtn" data-i18n="cancel">取消</button>
         </div>
         <div id="setTestResult" class="testResult hidden"></div>
         <div id="saveHint" class="sHint"></div>
-        <div class="sHint">Key 只保存在本机浏览器存储中，随请求经本地代理转发。</div>
+        <div class="sHint" data-i18n="hintKey">Key 只保存在本机浏览器存储中，随请求经本地代理转发。</div>
       </div>
     </div>
   </div>
