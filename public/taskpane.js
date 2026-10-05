@@ -9,10 +9,8 @@
  * API Key 出于安全不在代码中保存，首次使用在 ⚙ 里粘贴（存本机 localStorage）。
  */
 const DEFAULT_SETTINGS = {
-  upstreamBase: "https://api.example.com/anthropic",
+  upstreamBase: "https://api.example.com",
   apiFormat: "messages",
-  imageApiUrl: "https://api.example.com/v1/image_generation",
-  imageModel: "your-image-model",
   apiKey: "",
   model: "your-model-id",
   maxTokens: 16000,
@@ -390,9 +388,9 @@ async function forwardTo(url, opts) {
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
-  const body = { model: settings.imageModel || "your-image-model", prompt: String(prompt || "") };
+  const body = { model: settings.imageModel || settings.model, prompt: String(prompt || "") };
   if (aspect_ratio) body.aspect_ratio = String(aspect_ratio);
-  const resp = await forwardTo(settings.imageApiUrl || DEFAULT_SETTINGS.imageApiUrl, {
+  const resp = await forwardTo(imageUrl(), {
     headers: {
       "content-type": "application/json",
       "authorization": "Bearer " + settings.apiKey,
@@ -592,6 +590,13 @@ function chatTarget(base, format) {
   if (format === "responses") return b + "/v1/responses";
   if (format === "chat") return b + "/v1/chat/completions";
   return b + "/v1/messages";
+}
+
+/* 生图端点派生：与聊天共用上游 Base，路径一般为 /v1/image_generation（MiniMax 风格的
+ * /anthropic 前缀会剥掉）；生图模型默认沿用聊天模型。非标准服务商仍可用旧字段覆盖。 */
+function imageUrl() {
+  const root = (settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
+  return settings.imageApiUrl || root + "/v1/image_generation";
 }
 
 async function callApi(body, signal) {
@@ -996,12 +1001,12 @@ async function runSettingsTest() {
       headers: {
         "content-type": "application/json",
         "authorization": "Bearer " + key,
-        "x-upstream-url": settings.imageApiUrl || DEFAULT_SETTINGS.imageApiUrl,
+        "x-upstream-url": imageUrl(),
         "x-forward-auth": "1",
       },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
-        model: settings.imageModel || "your-image-model",
+        model: settings.imageModel || settings.model,
         prompt: "连通测试：一枚简单的橙色五角星，扁平风格",
       }),
     });

@@ -86,7 +86,7 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 | OpenAI Chat（DeepSeek / Moonshot / 智谱等） | `https://<host>` | OpenAI — /v1/chat/completions |
 
 - 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）。识图审查要求模型支持图片输入；内置默认值是示例占位（api.example.com），测试前请在设置中替换为你自己的服务商。
-- 生图端点配置在 `public/taskpane.js` 顶部（`imageApiUrl` / `imageModel`，示例占位），可让 agent 帮你改成任意生图服务；保存仍需生图测试通过。
+- 生图自动复用你的上游 Base（`<base>/v1/image_generation`）和聊天模型，无需单独配置；非标准服务商可在 `public/taskpane.js` 顶部用 `imageApiUrl` / `imageModel` 覆盖。保存仍需生图测试通过。
 
 配置好后直接用中文提需求，例如：
 
