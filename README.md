@@ -32,7 +32,7 @@ documents and API keys never leave it.
 - **11 fine-grained tools**: read overview / read slide / edit text / style text / add textbox / add slides / delete shape / generate image / insert image / screenshot / per-slide visual review
 - **Real screenshot review (RIP loop)**: after each slide, the add-in renders it to an image so the model can actually *look* at the result — checking overlap, overflow, distortion, style consistency — and fix issues on the spot
 - **No distorted images**: the model specifies a placement box; the add-in scales the picture to its true aspect ratio and centers it inside the box
-- **Bring your own model**: the panel speaks the Anthropic tool protocol; a local translation layer bridges any provider offering `/v1/messages`, `/v1/responses`, or `/v1/chat/completions` — no vendor lock-in
+- **Bring your own model**: the panel speaks the Anthropic tool protocol; a local translation layer bridges any provider offering `/v1/messages` or `/v1/responses` — no vendor lock-in
 - **Long tasks survive**: context over a threshold is auto-summarized into a handoff note (key data preserved), screenshots pruned to the latest one, with a hard stop as backstop
 
 ## Prerequisites
@@ -79,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 #    repo relative to its own path)
 ```
 
-After restarting PowerPoint, a **Slilot → AI Assistant** button appears at the right end of the Home tab.
+After restarting PowerPoint, a **Slilot** button appears at the right end of the Home tab.
 
 ## First run
 
@@ -90,10 +90,9 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 | Anthropic-compatible | `https://<host>/<anthropic-path>` | Anthropic — /v1/messages |
 | MiniMax (Anthropic-compatible) | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
-| OpenAI Chat (DeepSeek / Moonshot / Zhipu, etc.) | `https://<host>` | OpenAI — /v1/chat/completions |
 
 - **Test** runs three checks in parallel — **chat / vision / image generation** — and all three must pass before **Save** unlocks (any field change requires re-testing). Vision review needs a model that accepts image input. The built-in defaults are example placeholders (api.example.com) — replace them with your provider in settings before testing.
-- Image generation reuses your upstream base automatically (`<base>/v1/image_generation`) and the same model id as chat. Providers that require a dedicated image model id (e.g. MiniMax needs `image-01`) — fill it once in the optional 生图模型 field of the settings dialog (or override `imageModel` at the top of `public/taskpane.js`). Saving still requires the image test to pass.
+- Image generation reuses your upstream base automatically (`<base>/v1/image_generation`) and the same model id as chat. The image model id is separate from the text model (e.g. MiniMax needs `image-01`) — fill both 文本模型 and 生图模型 in the settings dialog; all three tests must pass before saving.
 
 Then just describe what you want, for example:
 
@@ -112,8 +111,7 @@ Local service server.js (Node ≥ 18, zero dependencies, HTTPS + dev cert)
     ▼
 Any https upstream
     ├─ Anthropic /v1/messages        passthrough
-    ├─ OpenAI   /v1/responses        request/response translation
-    └─ OpenAI   /v1/chat/completions request/response translation
+    └─ OpenAI   /v1/responses        request/response translation
 ```
 
 - **Tool loop**: the pane runs an Anthropic-protocol agent loop, decoupled from the upstream format; tools execute through two channels — Office.js (text, slides, reading shapes) and COM (precise image placement, full-deck screenshots).

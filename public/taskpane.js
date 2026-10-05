@@ -845,7 +845,7 @@ function detectCaps() {
     capSets = [];
     log("Surface 探测失败: " + String((e && e.message) || e));
   }
-  $("modelName").textContent = settings.model || DEFAULT_SETTINGS.model;
+  $("modelName").textContent = (settings.model || DEFAULT_SETTINGS.model) + (settings.imageModel ? " | " + settings.imageModel : "");
 }
 
 /* 事件绑定不依赖宿主初始化，立即执行 */
@@ -965,7 +965,7 @@ function openSettings() {
   $("setTestResult").classList.add("hidden");
   $("setTest").disabled = false; // 上次测试若因超时卡住，重开对话框时恢复可用
   $("setUpstream").value = settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase;
-  $("setFormat").value = settings.apiFormat || "messages";
+  $("setFormat").value = settings.apiFormat === "chat" ? "responses" : (settings.apiFormat || "messages"); // chat/completions 已弃用
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
   $("setImageModel").value = settings.imageModel || "";
@@ -1010,7 +1010,8 @@ async function runSettingsTest() {
   })();
 
   const imgTest = (async () => {
-    const imgModel = $("setImageModel").value.trim() || model;
+    const imgModel = $("setImageModel").value.trim();
+    if (!imgModel) throw new Error("请填写生图模型");
     const resp = await fetch("/api/forward", {
       method: "POST",
       headers: {

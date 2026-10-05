@@ -28,7 +28,7 @@
 - **11 个精细工具**：读概览 / 读某页 / 改文本 / 改样式 / 插文本框 / 加页 / 删形状 / 生图 / 插图 / 截图 / 逐页视觉审查
 - **真实截图审查（RIP 循环）**：每页做完自动用 PowerPoint 渲染成截图让模型"亲眼看"，检查重叠、溢出、变形、风格一致性后当场修复，而不是纯公式脑补
 - **插图不变形**：模型给的是摆放区域，插图按原图宽高比等比缩放并在区域内居中
-- **上游随便换**：面板统一 Anthropic 工具协议，本地服务内置翻译层，接任意提供 `/v1/messages`、`/v1/responses` 或 `/v1/chat/completions` 的服务商，不绑定任何厂商
+- **上游随便换**：面板统一 Anthropic 工具协议，本地服务内置翻译层，接任意提供 `/v1/messages` 或 `/v1/responses` 的服务商，不绑定任何厂商
 - **上下文自动管理**：长任务超限时自动把最早的工具明细折叠成交接摘要，关键数据（面积、台数、负责人）保留，任务不中断
 
 ## 前置条件
@@ -74,7 +74,7 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 #    把快捷方式移入启动文件夹（不要移动 vbs 本身，它按自身位置定位仓库）
 ```
 
-重启 PowerPoint 后，「开始」选项卡最右侧出现 **Slilot → AI 助手**。
+重启 PowerPoint 后，「开始」选项卡最右侧出现 **Slilot** 按钮。
 
 ## 首次配置
 
@@ -85,10 +85,9 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 | Anthropic 兼容 | `https://<host>/<anthropic路径>` | Anthropic — /v1/messages |
 | MiniMax（Anthropic 兼容） | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
-| OpenAI Chat（DeepSeek / Moonshot / 智谱等） | `https://<host>` | OpenAI — /v1/chat/completions |
 
 - 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）。识图审查要求模型支持图片输入；内置默认值是示例占位（api.example.com），测试前请在设置中替换为你自己的服务商。
-- 生图自动复用你的上游 Base（`<base>/v1/image_generation`）和聊天模型；要求单独图像模型 id 的服务商（如 MiniMax 需 `image-01`），在设置面板的「生图模型（可选）」里填一次即可（也可用 `public/taskpane.js` 顶部的 `imageModel` 覆盖）。保存仍需生图测试通过。
+- 生图端点自动派生（`<base>/v1/image_generation`）；生图模型独立于文本模型（如 MiniMax 需 `image-01`），在设置面板分别填写「文本模型」和「生图模型」。三项测试全部通过才能保存。
 
 配置好后直接用中文提需求，例如：
 
@@ -107,8 +106,7 @@ PowerPoint 任务窗格 (public/taskpane.html/js)
     ▼
 任意 https 上游
     ├─ Anthropic /v1/messages        透传
-    ├─ OpenAI   /v1/responses        请求/响应双向翻译
-    └─ OpenAI   /v1/chat/completions 请求/响应双向翻译
+    └─ OpenAI   /v1/responses        请求/响应双向翻译
 ```
 
 - **工具回路**：面板内是统一的 Anthropic 工具协议 Agent 回路，与上游格式解耦；工具经 Office.js（文本、建页、读形状）与 COM（精确插图、整稿截图）两条通道执行。

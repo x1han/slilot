@@ -5,7 +5,7 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>a7f3d9e2-6c48-4b1a-9d2f-3e5b7c9a1f84</Id>
-  <Version>1.4.3.0</Version>
+  <Version>1.4.4.0</Version>
   <ProviderName>本地自建</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="Slilot"/>
@@ -76,7 +76,7 @@
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Slilot"/>
-        <bt:String id="ButtonLabel" DefaultValue="AI 助手"/>
+        <bt:String id="ButtonLabel" DefaultValue="Slilot"/>
         <bt:String id="ButtonTitle" DefaultValue="Slilot"/>
       </bt:ShortStrings>
       <bt:LongStrings>
