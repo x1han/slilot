@@ -13,8 +13,7 @@ const DEFAULT_SETTINGS = {
   apiFormat: "messages",
   apiKey: "",
   model: "", // 必填（设置面板）
-  imageBase: "",   // 生图上游：留空 = 用文本模型的上游
-  imageFormat: "", // 生图接口风格：留空 = 跟随文本模型（minimax / openai）
+  imageBase: "", // 生图上游：留空 = 用文本模型的上游
   imageKey: "",  // 生图 Key：留空 = 用文本模型的 Key
   imageModel: "", // 必填（设置面板），如 MiniMax 的 image-01
   uiLang: "zh",   // 界面语言：zh（默认）/ en
@@ -38,7 +37,15 @@ const COMPACT_THRESHOLD = 300 * 1024;
 function loadSettings() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw));
+    if (raw) {
+      const s = Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw));
+      // 旧版本把示例占位存成了实值：视为未配置，清空以恢复灰占位语义
+      if (s.upstreamBase === "https://api.example.com") s.upstreamBase = "";
+      if (s.model === "your-model-id") s.model = "";
+      if (s.imageBase === "https://api.example.com") s.imageBase = "";
+      if (s.imageModel === "your-image-model") s.imageModel = "";
+      return s;
+    }
   } catch (e) {}
   return Object.assign({}, DEFAULT_SETTINGS);
 }
@@ -59,7 +66,6 @@ const I18N = {
     upstreamBase: "上游 Base（与接口格式拼接成完整地址）", protocol: "接口格式",
     apiKey: "API Key", textModel: "文本模型", imageModel: "生图模型",
     imageBase: "生图 Base（留空 = 用文本模型的上游）", imageKey: "生图 API Key（留空 = 用文本模型的 Key）",
-    imageProtocol: "生图接口格式（留空 = 跟随文本模型）", imgFmtAuto: "自动探测",
     notConfigured: "未配置模型",
     test: "测试", save: "保存", cancel: "取消",
     hintKey: "Key 只保存在本机浏览器存储中，随请求经本地代理转发。",
@@ -95,7 +101,6 @@ const I18N = {
     upstreamBase: "Upstream base (joined with the protocol below)", protocol: "Protocol",
     apiKey: "API Key", textModel: "Text model", imageModel: "Image model",
     imageBase: "Image base (empty = use the text one)", imageKey: "Image API key (empty = use the text one)",
-    imageProtocol: "Image protocol (empty = follow the text one)", imgFmtAuto: "Auto-probe",
     notConfigured: "No model configured",
     test: "Test", save: "Save", cancel: "Cancel",
     hintKey: "The key is stored only in this browser and forwarded via the local proxy.",
@@ -488,12 +493,10 @@ async function forwardTo(url, opts) {
 /* 生图请求：自动适配两类常见端点——MiniMax 风格 /v1/image_generation（返回 data.image_urls）
  * 与 OpenAI 标准 /v1/images/generations（返回 data[].url / b64_json）。按顺序探测，
  * 首个可用端点会写入 settings.imageApiUrl 记住，之后直接使用。返回 { base64, mime, width, height, endpoint }。 */
-async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio, imgFormat, textFormat) {
+async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio) {
   const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
-  const paths = imgFormat === "minimax" ? ["/v1/image_generation"]
-    : imgFormat === "openai" ? ["/v1/images/generations"]
-    : textFormat === "messages" ? ["/v1/image_generation", "/v1/images/generations"]
-    : ["/v1/images/generations", "/v1/image_generation"];
+  // 探测顺序：OpenAI 标准（事实主流，网关普遍兼容）优先，MiniMax 私有路径兜底
+  const paths = ["/v1/images/generations", "/v1/image_generation"];
   const candidates = [];
   if (settings.imageApiUrl) candidates.push(settings.imageApiUrl);
   for (const p of paths) {
@@ -551,7 +554,7 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio,
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
-  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio, settings.imageFormat, settings.apiFormat);
+  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio);
   const base64 = r.base64;
   if (!base64) throw new Error("图片数据为空");
   const mime = (r.mime || "image/png").toLowerCase();
@@ -1010,7 +1013,7 @@ function wireUI() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("setTest").addEventListener("click", runSettingsTest);
   $("setCancel").addEventListener("click", () => $("settingsDlg").classList.add("hidden"));
-  ["setUpstream", "setFormat", "setKey", "setModel", "setImageBase", "setImageFormat", "setImageKey", "setImageModel"].forEach((id) => {
+  ["setUpstream", "setFormat", "setKey", "setModel", "setImageBase", "setImageKey", "setImageModel"].forEach((id) => {
     $(id).addEventListener("input", updateSaveState);
     $(id).addEventListener("change", updateSaveState);
   });
@@ -1029,7 +1032,6 @@ function wireUI() {
     settings.apiKey = $("setKey").value.trim();
     settings.model = $("setModel").value.trim() || DEFAULT_SETTINGS.model;
     settings.imageBase = $("setImageBase").value.trim();
-    settings.imageFormat = $("setImageFormat").value;
     settings.imageKey = $("setImageKey").value.trim();
     settings.imageModel = $("setImageModel").value.trim();
     saveSettings();
@@ -1093,7 +1095,6 @@ function currentSignature() {
     $("setKey").value.trim(),
     $("setModel").value.trim(),
     $("setImageBase").value.trim(),
-    $("setImageFormat").value,
     $("setImageKey").value.trim(),
     $("setImageModel").value.trim(),
   ]);
@@ -1115,7 +1116,6 @@ function openSettings() {
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
   $("setImageBase").value = settings.imageBase || "";
-  $("setImageFormat").value = settings.imageFormat || "";
   $("setImageKey").value = settings.imageKey || "";
   $("setImageModel").value = settings.imageModel || "";
   updateSaveState();
@@ -1162,7 +1162,7 @@ async function runSettingsTest() {
     const imgKey = $("setImageKey").value.trim() || key;
     const imgModel = $("setImageModel").value.trim();
     if (!imgModel) throw new Error(t("noImageModel"));
-    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000), undefined, $("setImageFormat").value, format);
+    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000));
     return t("testImageOk");
   })();
 
