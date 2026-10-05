@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="public/icons/icon.svg" width="112" alt="Slilot logo"/>
+
 # Slilot
 
 **自托管的 PowerPoint AI 助手 —— 对话即改稿，直接读写你当前打开的演示文稿**
@@ -9,9 +11,8 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![PRs](https://img.shields.io/badge/PRs-welcome-orange)
 
-不同于 ChatGPT 生成后再导入重排，也不同于绑定微软账号的 Copilot：
-Slilot 模型直接在你的**当前文稿**上建页、写文本、插图片、逐页截图自检；
-跑在你自己的机器上，接你自己选的大模型服务，文档与 API Key 都不出本机。
+在 PowerPoint 侧边栏里用自然语言对话，模型直接在**当前打开的演示文稿**上建页、写文本、生成并插入配图，再逐页截图自检修复。
+整个插件跑在你自己的电脑上，接你自己选的大模型服务，文档与 API Key 都不出本机。
 
 <!-- TODO: 录一段 10 秒演示动图（对话 → 实时改稿）放到 docs/demo.gif，取消下行注释
 ![演示](docs/demo.gif)
@@ -42,11 +43,11 @@ Slilot 模型直接在你的**当前文稿**上建页、写文本、插图片、
 
 ### 方式一（推荐）：让 AI agent 帮你装
 
-把仓库 clone 到本地，在你的 ZCode / Claude Code / Cursor 等编码 agent 里直接说：
+把仓库 clone 到本地，对电脑里的 AI agent 说：
 
-> 请按本仓库 README 的安装说明，帮我安装这个 PowerPoint 插件（Slilot）：检查前置条件、安装并信任开发证书、完成侧载注册、启动本地服务并验证。关键步骤先征求我确认。
+> 给我的 PowerPoint 安装这个插件。
 
-agent 会依次完成：
+agent 会按仓库里的 README 与脚本依次完成：
 
 1. 检查 Node ≥ 18 与桌面版 PowerPoint；
 2. 运行 `npx office-addin-dev-certs install` 信任 localhost 开发证书（有系统弹窗，选信任）；
