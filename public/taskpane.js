@@ -13,7 +13,9 @@ const DEFAULT_SETTINGS = {
   apiFormat: "messages",
   apiKey: "",
   model: "your-model-id",
-  imageModel: "", // 空 = 沿用聊天模型；图像服务要求单独模型 id 时在设置里填（如 MiniMax 的 image-01）
+  imageBase: "", // 生图上游：留空 = 用文本模型的上游
+  imageKey: "",  // 生图 Key：留空 = 用文本模型的 Key
+  imageModel: "", // 必填（设置面板），如 MiniMax 的 image-01
   maxTokens: 16000,
 };
 const LS_KEY = "mm_ppt_settings_v4";
@@ -450,7 +452,7 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
-  const r = await requestImageGen(String(prompt || ""), settings.upstreamBase, settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio);
+  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio);
   const base64 = r.base64;
   if (!base64) throw new Error("图片数据为空");
   const mime = (r.mime || "image/png").toLowerCase();
@@ -837,7 +839,7 @@ async function runTurn(userText) {
       // 正常结束
       let finalText = text || "(模型没有返回文本)";
       if (data.stop_reason === "max_tokens") {
-        finalText += "\n\n⚠ 输出因 max_tokens 截断，可在设置中调大后重试。";
+        finalText += "\n\n⚠ 输出因 max_tokens 截断，回复「继续」我会接着做。";
       }
       addMsg("assistant", finalText);
       return;
@@ -908,7 +910,7 @@ function wireUI() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("setTest").addEventListener("click", runSettingsTest);
   $("setCancel").addEventListener("click", () => $("settingsDlg").classList.add("hidden"));
-  ["setUpstream", "setFormat", "setKey", "setModel", "setImageModel", "setMaxTokens"].forEach((id) => {
+  ["setUpstream", "setFormat", "setKey", "setModel", "setImageBase", "setImageKey", "setImageModel"].forEach((id) => {
     $(id).addEventListener("input", updateSaveState);
     $(id).addEventListener("change", updateSaveState);
   });
@@ -921,8 +923,9 @@ function wireUI() {
     settings.apiFormat = $("setFormat").value || "messages";
     settings.apiKey = $("setKey").value.trim();
     settings.model = $("setModel").value.trim() || DEFAULT_SETTINGS.model;
+    settings.imageBase = $("setImageBase").value.trim();
+    settings.imageKey = $("setImageKey").value.trim();
     settings.imageModel = $("setImageModel").value.trim();
-    settings.maxTokens = Number($("setMaxTokens").value) || DEFAULT_SETTINGS.maxTokens;
     saveSettings();
     $("settingsDlg").classList.add("hidden");
     detectCaps();
@@ -982,8 +985,9 @@ function currentSignature() {
     $("setFormat").value,
     $("setKey").value.trim(),
     $("setModel").value.trim(),
+    $("setImageBase").value.trim(),
+    $("setImageKey").value.trim(),
     $("setImageModel").value.trim(),
-    $("setMaxTokens").value,
   ]);
 }
 
@@ -1003,8 +1007,9 @@ function openSettings() {
   $("setFormat").value = settings.apiFormat === "chat" ? "responses" : (settings.apiFormat || "messages"); // chat/completions 已弃用
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
+  $("setImageBase").value = settings.imageBase || "";
+  $("setImageKey").value = settings.imageKey || "";
   $("setImageModel").value = settings.imageModel || "";
-  $("setMaxTokens").value = settings.maxTokens;
   updateSaveState();
   $("settingsDlg").classList.remove("hidden");
 }
@@ -1045,9 +1050,11 @@ async function runSettingsTest() {
   })();
 
   const imgTest = (async () => {
+    const imgBase = $("setImageBase").value.trim() || upstream;
+    const imgKey = $("setImageKey").value.trim() || key;
     const imgModel = $("setImageModel").value.trim();
     if (!imgModel) throw new Error("请填写生图模型");
-    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", upstream, key, imgModel, AbortSignal.timeout(45000));
+    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000));
     return "✅ 生图可用：返回图片正常";
   })();
 

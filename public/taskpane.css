@@ -98,3 +98,8 @@ body {
 }
 .sHint { font-size: 10.5px; color: #a1958a; margin-top: 6px; }
 .sHint.warn { color: #9c2a1d; }
+
+#settingsCard .sSection {
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e4d9cd;
+  font-weight: 600; color: #8c3a24; letter-spacing: .5px;
+}

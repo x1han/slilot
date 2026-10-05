@@ -51,6 +51,7 @@
     <div id="settingsDlg" class="hidden">
       <div id="settingsCard">
         <div class="sTitle">设置</div>
+        <label class="sSection">文本模型</label>
         <label>上游 Base（与下方格式拼接成完整地址）</label>
         <input id="setUpstream" type="text"/>
         <label>接口格式</label>
@@ -62,10 +63,13 @@
         <input id="setKey" type="password"/>
         <label>文本模型</label>
         <input id="setModel" type="text"/>
+        <label class="sSection">生图模型</label>
+        <label>生图 Base（留空 = 用文本模型的上游）</label>
+        <input id="setImageBase" type="text"/>
+        <label>生图 API Key（留空 = 用文本模型的 Key）</label>
+        <input id="setImageKey" type="password"/>
         <label>生图模型</label>
         <input id="setImageModel" type="text"/>
-        <label>max_tokens</label>
-        <input id="setMaxTokens" type="number" min="1024" max="65536"/>
         <div class="sBtns">
           <button id="setTest" class="secondaryBtn">测试</button>
           <button id="setSave" class="primaryBtn">保存</button>
