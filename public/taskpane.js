@@ -149,6 +149,7 @@ function applyLang() {
     if (lb) lb.textContent = settings.uiLang === "en" ? "中文" : "EN";
     setBusy(busy);
     updateSaveState();
+    renderModelBar();
   } catch (e) {}
 }
 function addMsg(kind, text) {
@@ -1040,6 +1041,12 @@ async function runTurn(userText) {
 }
 
 /* ---------------- 初始化 ---------------- */
+let officeReady = false;
+function renderModelBar() {
+  const parts = [settings.model, settings.imageModel].filter(Boolean);
+  $("modelName").textContent = officeReady ? (parts.join(" | ") || t("notConfigured")) : t("initializing");
+}
+
 function detectCaps() {
   // 宿主虚报 isSetSupported（1.1-1.8 全报支持），改用原型表面探测真实可用能力
   try {
@@ -1055,8 +1062,8 @@ function detectCaps() {
     capSets = [];
     log("Surface 探测失败: " + String((e && e.message) || e));
   }
-  const parts = [settings.model, settings.imageModel].filter(Boolean);
-  $("modelName").textContent = parts.join(" | ") || t("notConfigured");
+  officeReady = true;
+  renderModelBar();
 }
 
 /* 事件绑定不依赖宿主初始化，立即执行 */
