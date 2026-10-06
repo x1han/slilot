@@ -44,6 +44,7 @@ function loadSettings() {
       if (s.model === "your-model-id") s.model = "";
       if (s.imageBase === "https://api.example.com") s.imageBase = "";
       if (s.imageModel === "your-image-model") s.imageModel = "";
+      delete s.imageApiUrl; // 旧版"记住的端点"缓存会静默覆盖用户填的生图 Base，一律清除
       return s;
     }
   } catch (e) {}
@@ -503,7 +504,6 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
   // Base 本身已是完整生图端点时（用户直接粘贴 URL）原样使用，不再拼接
   const paths = ["/v1/images/generations", "/v1/image_generation"];
   const candidates = [];
-  if (settings.imageApiUrl) candidates.push(settings.imageApiUrl);
   if (/\/v1\/(images\/generations|image_generation)$/i.test(root)) {
     if (!candidates.includes(root)) candidates.push(root);
   } else {
@@ -547,8 +547,6 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
         : t("imgNoImg", { r: raw });
       continue;
     }
-    settings.imageApiUrl = endpoint; // 记住可用端点，之后跳过探测
-    saveSettings();
     if (b64) return { base64: b64, mime: "image/png", width: 0, height: 0, endpoint };
     const imgResp = await fetchRetry("/api/fetch-image", {
       method: "POST",
