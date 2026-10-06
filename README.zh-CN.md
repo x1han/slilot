@@ -26,8 +26,9 @@
 
 - **实时读写文档本体**：模型通过 Office.js / PowerPoint COM 直接操作打开的演示文稿，改的就是文件本身，全程可在 PowerPoint 里撤销、保存
 - **11 个精细工具**：读概览 / 读某页 / 改文本 / 改样式 / 插文本框 / 加页 / 删形状 / 生图 / 插图 / 截图 / 逐页视觉审查
-- **真实截图审查（RIP 循环）**：每页做完自动用 PowerPoint 渲染成截图让模型"亲眼看"，检查重叠、溢出、变形、风格一致性后当场修复，而不是纯公式脑补
+- **真实截图审查（RIP 循环）**：每页做完自动用 PowerPoint 渲染成截图让模型"亲眼看"，检查重叠、溢出、变形、风格一致性后当场修复，而不是纯公式脑补；并有确定性数值自检（文本截断/溢出/越界），未清零不得通过
 - **插图不变形**：模型给的是摆放区域，插图按原图宽高比等比缩放并在区域内居中
+- **中英双语界面**：设置内一键切换（默认中文）
 - **上游随便换**：面板统一 Anthropic 工具协议，本地服务内置翻译层，接任意提供 `/v1/messages` 或 `/v1/responses` 的服务商，不绑定任何厂商
 - **上下文自动管理**：长任务超限时自动把最早的工具明细折叠成交接摘要，关键数据（面积、台数、负责人）保留，任务不中断
 
@@ -86,10 +87,11 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 | MiniMax（Anthropic 兼容） | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 
-- 设置分两块：**文本识图模型**（聊天与识图用）填上游 Base / 接口格式 / API Key / 文本识图模型；**生图模型**（生图用）的 Base 与 API Key 留空时自动沿用文本识图模型的，生图模型必填（MiniMax 需 `image-01` 这类图像模型 id）。
+- 设置对话框分两块。**文本识图模型**（聊天与截图审查用）：上游 Base / 接口格式 / API Key / 文本识图模型 id。**生图模型**（插图用）：生图 Base / 生图 API Key——两者留空自动沿用文本块的——外加必填的生图模型 id（与文本识图模型相互独立，如 MiniMax 需 `image-01`）。
+- 面板界面本身中英双语：点「设置」标题旁的按钮切换（默认中文）。
 - 所有输入框的灰字都是示例占位（api.example.com / your-model-id / your-image-model），没有任何预配置——测试前请填入你自己的服务商。
-- 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，三项全绿后才能「保存」（改任何字段都需重新测试）；识图审查要求文本识图模型支持图片输入。
-- 生图端点自动探测：先 `<base>/v1/images/generations`（OpenAI 标准），404 再试 `<base>/v1/image_generation`（MiniMax 风格），成功端点会被记住；生图 Base 也可以直接填完整端点（识别后不再拼接）。
+- 点「**测试**」会并行验证三项：**聊天 / 识图 / 生图**，每行句首转圈、完成后变绿点（通过）或红点（失败）；三项全绿后才能「保存」（改任何字段都需重新测试）。识图检查会随机生成形状/颜色/位置并与真值比对，无法靠猜通过。
+- 生图端点自动探测：先 `<base>/v1/images/generations`（OpenAI 标准），404 再试 `<base>/v1/image_generation`（MiniMax 风格），成功端点会被记住；生图 Base 也可以直接填完整端点（识别后不再拼接）。慢生图模型可用：测试限时 5 分钟、实际生图 10 分钟。
 
 配置好后直接用中文提需求，例如：
 
@@ -147,7 +149,7 @@ PowerPoint 任务窗格 (public/taskpane.html/js)
 |---|---|
 | PowerPoint 里没有 Slilot 按钮 | 确认服务在跑（`https://localhost:3010/healthz` 返回 ok）→ 重启 PowerPoint → 仍没有则以管理员运行 `install-shared-catalog-admin.ps1` 后重启 |
 | 面板打不开 / 一直初始化 | 看 `logs/client-log.txt`；多为本地服务没启动或证书未信任 |
-| “开始”选项卡启动时没有按钮 | 永久版 Office 2021 开发者侧载的已知限制：命令注册发生在本会话首次打开加载项时——从【加载项】点一次即可。（图标托管在 GitHub Pages，需能访问 x1han.github.io） |
+| “开始”选项卡启动时没有按钮 | 永久版 Office 2021 开发者侧载的已知限制：命令注册发生在本会话首次打开加载项时从【加载项】菜单打开一次即可。（图标托管在 GitHub Pages，需能访问 x1han.github.io） |
 | 证书过期（面板突然打不开） | 开发证书默认有效期只有 30 天。刷新：`npx office-addin-dev-certs install --days 3650`，然后重启本地服务 |
 | GitHub 连不上（clone 失败） | 部分网络环境直连 github.com 被阻断——用 SSH clone（`git clone git@github.com:x1han/slilot.git`，需在 GitHub 账号配置 SSH key）或代理。其余环节均不依赖 GitHub：图标/FunctionFile 在 x1han.github.io（可直连）、office.js 有本地回退、模型上游是你自己的服务商 |
 | 测试不通过 | 聊天失败查上游地址 / 格式 / Key；识图失败说明该模型不支持图片输入，换模型；生图失败通常是 Key 未开通图像生成 |

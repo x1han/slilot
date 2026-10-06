@@ -30,8 +30,9 @@ documents and API keys never leave it.
 
 - **Edits the live document**: the model drives Office.js / PowerPoint COM to operate on the open presentation — changes land in the real file, fully undoable and savable in PowerPoint
 - **11 fine-grained tools**: read overview / read slide / edit text / style text / add textbox / add slides / delete shape / generate image / insert image / screenshot / per-slide visual review
-- **Real screenshot review (RIP loop)**: after each slide, the add-in renders it to an image so the model can actually *look* at the result — checking overlap, overflow, distortion, style consistency — and fix issues on the spot
+- **Real screenshot review (RIP loop)**: after each slide, the add-in renders it to an image so the model can actually *look* at the result — checking overlap, overflow, distortion, style consistency — and fix issues on the spot; a deterministic numeric audit (text truncation/overflow, out-of-canvas) must be cleared before moving on
 - **No distorted images**: the model specifies a placement box; the add-in scales the picture to its true aspect ratio and centers it inside the box
+- **Bilingual UI**: Chinese / English toggle in settings (Chinese by default)
 - **Bring your own model**: the panel speaks the Anthropic tool protocol; a local translation layer bridges any provider offering `/v1/messages` or `/v1/responses` — no vendor lock-in
 - **Long tasks survive**: context over a threshold is auto-summarized into a handoff note (key data preserved), screenshots pruned to the latest one, with a hard stop as backstop
 
@@ -91,10 +92,11 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 | MiniMax (Anthropic-compatible) | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
 | OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
 
-- The dialog has two blocks: **文本识图模型** (text & vision — used for chat & vision): upstream base / protocol / API key / text & vision model; **生图模型** (image): image base / API key — leave them empty to follow the text block's — plus a required image model id (MiniMax needs an image model like `image-01`).
+- The dialog has two blocks. **Text & vision model** (used for chat and screenshot review): upstream base / protocol / API key / text & vision model id. **Image model** (used for illustrations): image base / image API key — leave both empty to follow the text block's — plus a required image model id, separate from the text one (e.g. MiniMax needs `image-01`).
+- The pane UI itself is bilingual: toggle with the button next to "Settings" (Chinese by default).
 - Every input shows a grey example placeholder (api.example.com / your-model-id / your-image-model); nothing is preconfigured — fill your provider before testing.
-- **Test** runs three checks in parallel — **chat / vision / image** — and all three must pass before **Save** unlocks (any field change requires re-testing); vision review needs the text & vision model to accept image input.
-- The image endpoint is auto-probed: `<base>/v1/images/generations` (OpenAI standard) first, then `<base>/v1/image_generation` (MiniMax-style); the working one is remembered. The image base may also be a full endpoint URL — it is used as-is.
+- **Test** runs three checks in parallel — **chat / vision / image** — each line shows a spinner, then a green dot (pass) or red dot (fail) as it completes; all three must pass before **Save** unlocks (any field change requires re-testing). The vision check draws a random shape/color/position and compares the model's description against ground truth, so it cannot be passed by guessing.
+- The image endpoint is auto-probed: `<base>/v1/images/generations` (OpenAI standard) first, then `<base>/v1/image_generation` (MiniMax-style); the working one is remembered. The image base may also be a full endpoint URL — it is used as-is. Slow image models are supported (5-minute test window, 10-minute generation window).
 
 Then just describe what you want, for example:
 
@@ -152,7 +154,7 @@ Any https upstream
 |---|---|
 | No Slilot button in PowerPoint | Check the service is up (`https://localhost:3010/healthz` returns ok) → restart PowerPoint → still missing: run `install-shared-catalog-admin.ps1` as admin and restart |
 | Pane won't load / stuck initializing | Check `logs/client-log.txt`; usually the local service isn't running or the certificate isn't trusted |
-| No Slilot button on the Home tab at startup | Known limitation of developer sideloading on perpetual Office 2021 — ribbon commands register on first launch of each session; click 加载项 once. (Icons are served from GitHub Pages and need internet access to x1han.github.io.) |
+| No Slilot button on the Home tab at startup | Known limitation of developer sideloading on perpetual Office 2021 — ribbon commands register on first launch of each session; open it once from the Add-ins menu. (Icons are served from GitHub Pages and need internet access to x1han.github.io.) |
 | Certificate expired (pane suddenly won't load) | The dev certificate defaults to 30-day validity. Refresh with `npx office-addin-dev-certs install --days 3650`, then restart the local service |
 | GitHub unreachable (clone fails) | Direct github.com access is blocked in some networks — use SSH clone (`git clone git@github.com:x1han/slilot.git`, requires an SSH key on your GitHub account) or a proxy. Everything else runs without GitHub: icons/FunctionFile live on x1han.github.io (reachable directly), office.js has a local fallback, and the model upstream is your own provider |
 | Tests fail | Chat: check upstream URL / protocol / key. Vision: the model doesn't accept images — switch models. Image: the key likely lacks image-generation access |
