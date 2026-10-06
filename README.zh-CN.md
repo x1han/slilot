@@ -58,6 +58,21 @@ agent 会按仓库里的 README 与脚本依次完成：
 4. 启动 `node server.js`，并用 `https://localhost:3010/healthz` 返回 ok 验证；
 5. 可选：在 `autostart-hidden.vbs` 上创建快捷方式，把快捷方式放进启动文件夹（Win+R → `shell:startup`）实现开机自启。
 
+**Agent 也能自动完成配置**——本地服务暴露了一组小接口，Agent 可以自行探索并填写设置，无需手动填表：
+
+| 本机接口（https://localhost:3010） | 用途 |
+|---|---|
+| GET /api/settings | 读取当前配置 |
+| POST /api/settings | 合并写入配置（upstreamBase / apiFormat / apiKey / model / imageBase / imageFormat / imageKey / imageModel） |
+| POST /api/probe/models | 列出服务商可用的模型（body: base, key） |
+| POST /api/probe/chat | 聊天连通性（body: base, format, key, model） |
+| POST /api/probe/vision | 识图真实性——服务端随机生成图形并与真值比对 |
+| POST /api/probe/image | 生图连通性（自动探测两种生图端点） |
+
+对 Agent 说一句即可：通过 localhost:3010 的探测接口探索我的服务商支持哪些模型与能力，选出文本识图模型与生图模型，三项探测通过后把配置写入 /api/settings。
+
+面板打开时与每 30 秒会自动从本地服务同步配置——Agent 写入后，重开面板（或稍等片刻）即生效。注意：GET /api/settings 会返回 API Key；整组接口仅绑定 127.0.0.1、仅信任本机调用。
+
 ### 方式二：手动安装
 
 ```powershell
@@ -139,7 +154,7 @@ PowerPoint 任务窗格 (public/taskpane.html/js)
 
 ## 安全与隐私
 
-- API Key 只保存在本机面板的 localStorage（浏览器存储），**不写入仓库代码、不上传**；本地服务仅内存转发、不落盘、无任何遥测。
+- API Key 只保存在本机——面板浏览器存储与本目录的 `settings.json`（已 gitignore）——**不写入仓库代码、不上传**；本地服务仅内存转发、无任何遥测。
 - 你的演示文稿内容只发送到**你自己填写的上游地址**（本地服务强制 https）；换模型就是换服务商。
 - `server.js` 数百行、零依赖，欢迎自行审计；仅监听 `127.0.0.1`，并拒绝跨源请求。
 - 建议使用可信的模型服务商；备用共享目录方案会创建 SMB 共享，装完可执行 `net share addincatalog /delete` 清理。

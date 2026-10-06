@@ -62,6 +62,21 @@ The agent follows the README and scripts to:
 4. Start `node server.js` and verify `https://localhost:3010/healthz` returns ok;
 5. Optional: create a shortcut to `autostart-hidden.vbs` and drop the shortcut into the Startup folder (Win+R → `shell:startup`) for autostart.
 
+**Configure it with the agent too** — the local service exposes a small API so the agent can explore and fill the settings itself (no manual form-filling):
+
+| Local API (https://localhost:3010) | Purpose |
+|---|---|
+| GET /api/settings | Read the current config |
+| POST /api/settings | Merge-write config (upstreamBase / apiFormat / apiKey / model / imageBase / imageFormat / imageKey / imageModel) |
+| POST /api/probe/models | List the models your provider offers (body: base, key) |
+| POST /api/probe/chat | Chat connectivity (body: base, format, key, model) |
+| POST /api/probe/vision | Real-vision check — the service draws a random shape/color/position and validates the model's description against ground truth |
+| POST /api/probe/image | Image-generation connectivity (auto-probes both image endpoint styles) |
+
+Example instruction to the agent: "Probe my provider's models and capabilities through localhost:3010's probe API, pick a text & vision model and an image model, verify all three checks, then write the config to /api/settings."
+
+The pane syncs from the service on open and every 30 seconds — after the agent writes the config, reopen the pane (or wait a moment) and it just works. Note: GET /api/settings returns the API key; the whole API is bound to 127.0.0.1 and trusts local processes only.
+
 ### Option 2: manual install
 
 ```powershell
@@ -144,7 +159,7 @@ Any https upstream
 
 ## Security & privacy
 
-- The API key lives only in the pane's localStorage (browser storage) — **never in the repo, never uploaded**; the local service forwards in memory only, writes nothing, no telemetry.
+- The API key lives on your machine only — in the pane's browser storage and the local `settings.json` (gitignored) — **never in the repo, never uploaded**; the local service forwards in memory only, no telemetry.
 - Your presentation content is sent only to the upstream you configure (https enforced); switching models means switching providers.
 - `server.js` is a few hundred lines, zero dependencies — audit it yourself; it listens on `127.0.0.1` only and rejects cross-origin requests.
 - Use a reputable model provider; the optional shared-catalog script creates an SMB share — remove it afterwards with `net share addincatalog /delete`.

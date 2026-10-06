@@ -1098,6 +1098,7 @@ function wireUI() {
   $("setUiLang").addEventListener("click", () => {
     settings.uiLang = settings.uiLang === "en" ? "zh" : "en";
     saveSettings();
+    pushSettingsToServer();
     applyLang();
   });
   $("setSave").addEventListener("click", () => {
@@ -1113,6 +1114,7 @@ function wireUI() {
     settings.imageKey = $("setImageKey").value.trim();
     settings.imageModel = $("setImageModel").value.trim();
     saveSettings();
+    pushSettingsToServer();
     $("settingsDlg").classList.add("hidden");
     detectCaps();
   });
@@ -1121,6 +1123,8 @@ function wireUI() {
 function init() {
   wireUI();
   applyLang();
+  refreshSettingsFromServer();
+  setInterval(refreshSettingsFromServer, 30000);
   // CDN 不可达时本地回退脚本（office.js）加载需要时间：轮询等待 Office 就绪（最多 12 秒），
   // 而不是立即 fatal——否则 CDN 受限的网络下面板永远起不来。
   const t0 = Date.now();
@@ -1186,18 +1190,49 @@ function updateSaveState() {
   hint.classList.toggle("warn", !ok);
 }
 
-function openSettings() {
-  $("setTestResult").classList.add("hidden");
-  $("setTest").disabled = false; // 上次测试若因超时卡住，重开对话框时恢复可用
-  $("setUpstream").value = settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase;
+function fillSettingsForm() {
+  $("setUpstream").value = settings.upstreamBase || "";
   $("setFormat").value = settings.apiFormat === "chat" ? "responses" : (settings.apiFormat || "messages"); // chat/completions 已弃用
   $("setKey").value = settings.apiKey;
   $("setModel").value = settings.model;
   $("setImageBase").value = settings.imageBase || "";
   $("setImageKey").value = settings.imageKey || "";
   $("setImageModel").value = settings.imageModel || "";
+}
+
+function openSettings() {
+  $("setTestResult").classList.add("hidden");
+  $("setTest").disabled = false; // 上次测试若因超时卡住，重开对话框时恢复可用
+  fillSettingsForm();
   updateSaveState();
   $("settingsDlg").classList.remove("hidden");
+  // Agent 或外部工具可能改过服务端配置：打开面板时同步一次并刷新表单
+  refreshSettingsFromServer().then(() => { fillSettingsForm(); updateSaveState(); }).catch(() => {});
+}
+
+/* ---------- 服务端配置同步：settings.json 是面板与 Agent 共用的事实来源 ---------- */
+async function refreshSettingsFromServer() {
+  try {
+    const r = await fetchRetry("/api/settings", {}, 2);
+    if (!r.ok) return;
+    const s = await r.json();
+    if (JSON.stringify(s) === JSON.stringify(settings)) return; // 无变化
+    Object.assign(settings, s);
+    saveSettings(); // 镜像到 localStorage（旧版本兼容）
+    renderModelBar();
+    applyLang();
+    updateSaveState();
+    log("配置已从本地服务同步（Agent 或其他面板修改）");
+  } catch (e) {}
+}
+function pushSettingsToServer() {
+  try {
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(settings),
+    }).catch(() => {});
+  } catch (e) {}
 }
 
 async function runSettingsTest() {

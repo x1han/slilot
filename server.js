@@ -14,6 +14,7 @@ const path = require("path");
 const os = require("os");
 const { Readable } = require("stream");
 const { execFile } = require("child_process");
+const zlib = require("zlib");
 
 const PORT = 3010;
 const ROOT = path.join(__dirname, "public");
@@ -461,6 +462,167 @@ async function handleInsertImage(req, res) {
   res.end(JSON.stringify({ ok: true, placed }));
 }
 
+/* ---------- 设置存储与 Agent 探测接口 ----------
+ * settings.json 是面板与外部 Agent 共用的唯一配置事实来源：
+ *   GET  /api/settings     读取当前配置（含 Key，仅限本机信任环境）
+ *   POST /api/settings     合并写入（仅接受已知字段），_v 自增用于变更检测
+ *   POST /api/probe/models {base,key}                 -> 列出上游可用模型
+ *   POST /api/probe/chat   {base,format,key,model}    -> 聊天连通性
+ *   POST /api/probe/vision {base,format,key,model}    -> 识图真实性（随机图形+真值比对）
+ *   POST /api/probe/image  {base,key,model}           -> 生图连通性（双路径探测）
+ * 信任模型与 /api/forward 一致：仅监听 127.0.0.1，跨源浏览器请求 403，本机无 Origin 的工具调用放行。 */
+const SETTINGS_FILE = path.join(__dirname, "settings.json");
+const SETTING_KEYS = ["upstreamBase", "apiFormat", "apiKey", "model", "imageBase", "imageKey", "imageModel", "uiLang"];
+let settingsCache = null;
+function currentSettings() {
+  if (!settingsCache) {
+    const defaults = { upstreamBase: "", apiFormat: "messages", apiKey: "", model: "", imageBase: "", imageFormat: "", imageKey: "", imageModel: "", uiLang: "zh", maxTokens: 16000, _v: 0 };
+    try { settingsCache = Object.assign(defaults, JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"))); } catch (e) { settingsCache = defaults; }
+  }
+  return settingsCache;
+}
+function sendJson(res, status, obj) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify(obj));
+}
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); } catch (e) { return {}; }
+}
+function handleGetSettings(req, res) { sendJson(res, 200, currentSettings()); }
+async function handlePostSettings(req, res) {
+  const body = await readJsonBody(req);
+  const cur = currentSettings();
+  for (const k of SETTING_KEYS) if (k in body) cur[k] = String(body[k] == null ? "" : body[k]).slice(0, 8000);
+  if (body.maxTokens != null) cur.maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 16000, 256), 65536);
+  cur._v = (cur._v || 0) + 1;
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(cur, null, 2));
+  sendJson(res, 200, cur);
+}
+function chatRequestFor(base, format, key, model, maxTokens, content) {
+  const b = base.replace(/\/+$/, "");
+  if (format === "responses") {
+    return {
+      url: b + "/v1/responses",
+      headers: { "content-type": "application/json", "authorization": "Bearer " + key },
+      body: { model, max_output_tokens: maxTokens, input: content, store: false },
+      extract: (data) => (data.output || []).filter((i) => i.type === "message").flatMap((i) => i.content || []).filter((c) => c.type === "output_text").map((c) => c.text).join(""),
+    };
+  }
+  return {
+    url: b + "/v1/messages",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + key, "anthropic-version": "2023-06-01" },
+    body: { model, max_tokens: maxTokens, messages: Array.isArray(content) ? content : [{ role: "user", content }] },
+    extract: (data) => (data.content || []).filter((x) => x.type === "text").map((x) => x.text).join(""),
+  };
+}
+async function handleProbeModels(req, res) {
+  const { base, key } = await readJsonBody(req);
+  if (!/^https:\/\//i.test(base || "")) return sendJson(res, 400, { error: "base 必须是 https URL" });
+  const r = await fetch(base.replace(/\/+$/, "") + "/v1/models", { headers: { authorization: "Bearer " + (key || "") }, signal: AbortSignal.timeout(15000) });
+  const data = await r.json().catch(() => ({}));
+  sendJson(res, 200, { ok: r.ok, status: r.status, models: (data.data || []).map((m) => m.id).filter(Boolean) });
+}
+async function handleProbeChat(req, res) {
+  const { base, format, key, model } = await readJsonBody(req);
+  const rq = chatRequestFor(base, format || "messages", key || "", model || "", 16, "ping");
+  const r = await fetch(rq.url, { method: "POST", headers: rq.headers, body: JSON.stringify(rq.body), signal: AbortSignal.timeout(30000) });
+  const body = await r.text();
+  if (!r.ok) return sendJson(res, 200, { ok: false, status: r.status, reply: body.slice(0, 300) });
+  const data = JSON.parse(body);
+  sendJson(res, 200, { ok: true, status: r.status, reply: rq.extract(data).slice(0, 80) });
+}
+/* 随机生成 256x256 测试图（形状/颜色/位置随机），返回 PNG 与真值——识图探测的判定依据 */
+function makeVisionPng() {
+  const W = 256, H = 256;
+  const colors = [["红色", [214, 69, 65]], ["绿色", [46, 158, 91]], ["蓝色", [59, 110, 165]], ["黄色", [224, 168, 0]], ["紫色", [142, 91, 214]], ["橙色", [224, 123, 57]]];
+  const shapes = ["圆形", "正方形", "三角形"];
+  const zones = [["左上", 88, 88], ["右上", 168, 88], ["中央", 128, 128], ["左下", 88, 168], ["右下", 168, 168]];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const shape = shapes[Math.floor(Math.random() * shapes.length)];
+  const zone = zones[Math.floor(Math.random() * zones.length)];
+  const S = 56;
+  const rgba = Buffer.alloc(W * H * 4, 255);
+  const put = (x, y) => { const i = (y * W + x) * 4; rgba[i] = color[1][0]; rgba[i + 1] = color[1][1]; rgba[i + 2] = color[1][2]; rgba[i + 3] = 255; };
+  for (let dy = -S / 2; dy <= S / 2; dy++) for (let dx = -S / 2; dx <= S / 2; dx++) {
+    const x = Math.round(zone[1] + dx), y = Math.round(zone[2] + dy);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    if (shape === "正方形") put(x, y);
+    else if (shape === "圆形") { if (dx * dx + dy * dy <= (S / 2) * (S / 2)) put(x, y); }
+    else { const half = (dy + S / 2) / 2; if (Math.abs(dx) <= half) put(x, y); }
+  }
+  const IHDR = Buffer.alloc(13);
+  IHDR.writeUInt32BE(W, 0); IHDR.writeUInt32BE(H, 4); IHDR[8] = 8; IHDR[9] = 6;
+  const stride = W * 4 + 1;
+  const raw = Buffer.alloc(stride * H);
+  for (let y = 0; y < H; y++) { raw[y * stride] = 0; rgba.copy(raw, y * stride + 1, y * W * 4, (y + 1) * W * 4); }
+  const pngChunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const t = Buffer.from(type, "ascii");
+    const crcBuf = Buffer.concat([t, data]);
+    const table = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0; }
+    let crc = 0xFFFFFFFF; for (const bt of crcBuf) crc = table[(crc ^ bt) & 0xFF] ^ (crc >>> 8);
+    const crcB = Buffer.alloc(4); crcB.writeUInt32BE((crc ^ 0xFFFFFFFF) >>> 0);
+    return Buffer.concat([len, t, data, crcB]);
+  };
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    pngChunk("IHDR", IHDR),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  return { png, truth: color[0] + "的" + shape + "、位于画面" + zone[0] };
+}
+async function handleProbeVision(req, res) {
+  const { base, format, key, model } = await readJsonBody(req);
+  const { png, truth } = makeVisionPng();
+  const b64 = png.toString("base64");
+  const q = "用一句话描述这张图片：主体是什么形状、什么颜色、位于画面哪个区域（左上/右上/左下/右下/中央）？只描述看到的内容，不要推断。";
+  const rq = chatRequestFor(base, format || "messages", key || "", model || "", 512, [
+    { type: "image", source: { type: "base64", media_type: "image/png", data: b64 } },
+    { type: "text", text: q },
+  ]);
+  if (format === "responses") rq.body.input = [{ role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64," + b64 }, { type: "input_text", text: q }] }];
+  const r = await fetch(rq.url, { method: "POST", headers: rq.headers, body: JSON.stringify(rq.body), signal: AbortSignal.timeout(45000) });
+  const body = await r.text();
+  if (!r.ok) return sendJson(res, 200, { ok: false, status: r.status, truth, reply: body.slice(0, 300) });
+  const reply = rq.extract(JSON.parse(body)).slice(0, 120);
+  const shapeM = truth.match(/的(\S+?)、/), zoneM = truth.match(/画面(\S+)$/);
+  const colorName = truth.slice(0, 2);
+  const pass = !!shapeM && !!zoneM && reply.includes(colorName) && reply.includes(shapeM[1]) && (!/(左上|右上|左下|右下)/.test(reply) || reply.includes(zoneM[1]));
+  sendJson(res, 200, { ok: pass, truth, reply });
+}
+async function handleProbeImage(req, res) {
+  const { base, key, model } = await readJsonBody(req);
+  const root = (base || "").replace(/\/+$/, "");
+  const paths = ["/v1/images/generations", "/v1/image_generation"];
+  let last = "未尝试";
+  for (const p of paths) {
+    const endpoint = root + p;
+    let r;
+    try {
+      r = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": "Bearer " + (key || "") },
+        body: JSON.stringify({ model: model || "", prompt: "连通测试：一枚简单的橙色五角星，扁平风格" }),
+        signal: AbortSignal.timeout(300000),
+      });
+    } catch (e) { last = String((e && e.cause && e.cause.code) || (e && e.message) || e); continue; }
+    const body = await r.text();
+    if (r.status === 404) { last = "HTTP 404（" + endpoint + "）"; continue; }
+    if (!r.ok) return sendJson(res, 200, { ok: false, endpoint, status: r.status, reply: body.slice(0, 300) });
+    const data = JSON.parse(body);
+    const d = data && data.data;
+    let picUrl = null, b64 = null;
+    if (Array.isArray(d)) { const f = d.find((x) => x && (x.url || x.b64_json)) || {}; picUrl = f.url || null; b64 = f.b64_json || null; }
+    else if (d && Array.isArray(d.image_urls)) { picUrl = d.image_urls[0] || null; }
+    if (!picUrl && !b64) { last = "响应中没有图片: " + JSON.stringify(data).slice(0, 200); continue; }
+    return sendJson(res, 200, { ok: true, endpoint, url: picUrl, hasB64: !!b64 });
+  }
+  sendJson(res, 200, { ok: false, tried: paths, last });
+}
+
 function handleStatic(req, res, pathname) {
   let p = decodeURIComponent(pathname);
   if (p === "/") p = "/taskpane.html";
@@ -501,6 +663,16 @@ const handler = async (req, res) => {
     } else if (url.pathname === "/api/insert-image") {
       // 精确插图：指定页 + 坐标（PowerPoint COM AddPicture）
       await handleInsertImage(req, res);
+    } else if (url.pathname === "/api/settings") {
+      if (req.method === "POST") await handlePostSettings(req, res); else await handleGetSettings(req, res);
+    } else if (url.pathname === "/api/probe/models") {
+      await handleProbeModels(req, res);
+    } else if (url.pathname === "/api/probe/chat") {
+      await handleProbeChat(req, res);
+    } else if (url.pathname === "/api/probe/vision") {
+      await handleProbeVision(req, res);
+    } else if (url.pathname === "/api/probe/image") {
+      await handleProbeImage(req, res);
     } else if (url.pathname === "/client-log") {
       // 面板"黑匣子"：接收页面 JS 错误与状态日志
       const chunks = [];
