@@ -92,7 +92,7 @@ const I18N = {
     chatFailed: "聊天失败：", visionFailed: "识图失败：", imageFailed: "生图失败：",
     testWarn: "⚠ 存在不可用项，不能保存。请更换支持全部三项能力的模型（或检查地址 / Key）后重新测试。",
     testMeta: "（{s} 秒。测试用的是输入框当前值）",
-    imgApiErr: "生图 API {s}: {t}", imgModelRejected: "生图接口拒绝了模型 id（{m}）：{r} —— 该服务要求单独的图像模型（如 image-01）",
+    imgApiErr: "生图 API {u} 返回 {s}: {t}", imgModelRejected: "生图接口拒绝了模型 id（{m}）：{r} —— 该服务要求单独的图像模型（如 image-01）",
     imgNoImg: "响应中没有图片: {r}", imgDownloadFail: "下载生成图片失败: HTTP {s} {t}",
     imgEndpointsFail: "生图端点不可用（尝试了 {l}）：{e}", endpoint404: "HTTP 404（{u} 不存在）",
   },
@@ -129,7 +129,7 @@ const I18N = {
     chatFailed: "Chat failed: ", visionFailed: "Vision failed: ", imageFailed: "Image failed: ",
     testWarn: "⚠ Some checks failed — cannot save. Use a model covering all three capabilities (or check the address / key), then re-test.",
     testMeta: "({s}s. Tested with the values currently in the form)",
-    imgApiErr: "Image API {s}: {t}", imgModelRejected: "The image API rejected the model id ({m}): {r} — this service requires a dedicated image model (e.g. image-01)",
+    imgApiErr: "Image API {u} returned {s}: {t}", imgModelRejected: "The image API rejected the model id ({m}): {r} — this service requires a dedicated image model (e.g. image-01)",
     imgNoImg: "No image in the response: {r}", imgDownloadFail: "Failed to download the generated image: HTTP {s} {t}",
     imgEndpointsFail: "Image endpoints unavailable (tried {l}): {e}", endpoint404: "HTTP 404 ({u} not found)",
   },
@@ -499,13 +499,18 @@ async function forwardTo(url, opts) {
  * 首个可用端点会写入 settings.imageApiUrl 记住，之后直接使用。返回 { base64, mime, width, height, endpoint }。 */
 async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio) {
   const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
-  // 探测顺序：OpenAI 标准（事实主流，网关普遍兼容）优先，MiniMax 私有路径兜底
+  // 探测顺序：OpenAI 标准（事实主流，网关普遍兼容）优先，MiniMax 私有路径兜底；
+  // Base 本身已是完整生图端点时（用户直接粘贴 URL）原样使用，不再拼接
   const paths = ["/v1/images/generations", "/v1/image_generation"];
   const candidates = [];
   if (settings.imageApiUrl) candidates.push(settings.imageApiUrl);
-  for (const p of paths) {
-    const u = root + p;
-    if (!candidates.includes(u)) candidates.push(u);
+  if (/\/v1\/(images\/generations|image_generation)$/i.test(root)) {
+    if (!candidates.includes(root)) candidates.push(root);
+  } else {
+    for (const p of paths) {
+      const u = root + p;
+      if (!candidates.includes(u)) candidates.push(u);
+    }
   }
   let lastErr = "未尝试任何端点";
   for (const endpoint of candidates) {
@@ -524,7 +529,7 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
       });
     } catch (e) { lastErr = String((e && e.message) || e); continue; }
     if (resp.status === 404) { lastErr = t("endpoint404", { u: endpoint }); continue; }
-    if (!resp.ok) throw new Error(t("imgApiErr", { s: resp.status, t: (await resp.text()).slice(0, 300) }));
+    if (!resp.ok) throw new Error(t("imgApiErr", { u: endpoint, s: resp.status, t: (await resp.text()).slice(0, 300) }));
     const data = await resp.json().catch(() => ({}));
     const d = data && data.data;
     let picUrl = null, b64 = null;

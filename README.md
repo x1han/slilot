@@ -94,7 +94,7 @@ Open ⚙ in the bottom-right of the pane and fill in your model service:
 - The dialog has two blocks: **文本模型** (text — used for chat & vision): upstream base / protocol / API key / text model; **生图模型** (image): image base / API key — leave them empty to follow the text block's — plus a required image model id (MiniMax needs an image model like `image-01`).
 - Every input shows a grey example placeholder (api.example.com / your-model-id / your-image-model); nothing is preconfigured — fill your provider before testing.
 - **Test** runs three checks in parallel — **chat / vision / image** — and all three must pass before **Save** unlocks (any field change requires re-testing); vision review needs the text model to accept image input.
-- The image endpoint is auto-probed: `<base>/v1/image_generation` (MiniMax-style) first, then `<base>/v1/images/generations` (OpenAI standard); the working one is remembered.
+- The image endpoint is auto-probed: `<base>/v1/images/generations` (OpenAI standard) first, then `<base>/v1/image_generation` (MiniMax-style); the working one is remembered. The image base may also be a full endpoint URL — it is used as-is.
 
 Then just describe what you want, for example:
 
