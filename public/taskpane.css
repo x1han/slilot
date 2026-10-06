@@ -110,6 +110,7 @@ body {
   font-weight: 600; color: #8c3a24; letter-spacing: .5px;
 }
 
+#setTestResult { max-height: 138px; overflow-y: auto; overscroll-behavior: contain; }
 #setTestResult .tline { display: flex; align-items: flex-start; gap: 6px; }
 #setTestResult .spin {
   width: 10px; height: 10px; margin-top: 2px; flex: none;

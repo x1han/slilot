@@ -63,9 +63,9 @@ const I18N = {
   zh: {
     newChat: "新会话", send: "发送", stop: "停止", settings: "设置",
     inputPh: "描述你想生成或修改的内容…（Enter 发送）", initializing: "正在初始化…",
-    sectionText: "文本模型", sectionImage: "生图模型",
+    sectionText: "文本识图模型", sectionImage: "生图模型",
     upstreamBase: "上游 Base（与接口格式拼接成完整地址）", protocol: "接口格式",
-    apiKey: "API Key", textModel: "文本模型", imageModel: "生图模型",
+    apiKey: "API Key", textModel: "文本识图模型", imageModel: "生图模型",
     imageBase: "生图 Base（留空 = 用文本模型的上游）", imageKey: "生图 API Key（留空 = 用文本模型的 Key）",
     notConfigured: "未配置模型",
     test: "测试", save: "保存", cancel: "取消",
@@ -100,9 +100,9 @@ const I18N = {
   en: {
     newChat: "New chat", send: "Send", stop: "Stop", settings: "Settings",
     inputPh: "Describe what to generate or edit… (Enter to send)", initializing: "Initializing…",
-    sectionText: "Text model", sectionImage: "Image model",
+    sectionText: "Text & vision model", sectionImage: "Image model",
     upstreamBase: "Upstream base (joined with the protocol below)", protocol: "Protocol",
-    apiKey: "API Key", textModel: "Text model", imageModel: "Image model",
+    apiKey: "API Key", textModel: "Text & vision model", imageModel: "Image model",
     imageBase: "Image base (empty = use the text one)", imageKey: "Image API key (empty = use the text one)",
     notConfigured: "No model configured",
     test: "Test", save: "Save", cancel: "Cancel",
@@ -1222,6 +1222,7 @@ async function runSettingsTest() {
   const settle = (row, ok, text) => {
     row.mark.className = ok ? "tdot pass" : "tdot fail";
     row.txt.textContent = text;
+    out.scrollTop = out.scrollHeight;
   };
   $("setTest").disabled = true;
   testState = { passed: false, signature: null };
@@ -1336,6 +1337,7 @@ async function runSettingsTest() {
   meta.className = "tmeta";
   meta.textContent = t("testMeta", { s: Math.round((Date.now() - t0) / 1000) });
   out.appendChild(meta);
+  out.scrollTop = out.scrollHeight;
   if (!allOk) {
     const warn = document.createElement("div");
     warn.className = "tmeta twarn";
