@@ -496,8 +496,8 @@ async function forwardTo(url, opts) {
 }
 
 /* 生图请求：自动适配两类常见端点——MiniMax 风格 /v1/image_generation（返回 data.image_urls）
- * 与 OpenAI 标准 /v1/images/generations（返回 data[].url / b64_json）。按顺序探测，
- * 首个可用端点会写入 settings.imageApiUrl 记住，之后直接使用。返回 { base64, mime, width, height, endpoint }。 */
+ * 与 OpenAI 标准 /v1/images/generations（返回 data[].url / b64_json）。按顺序探测直到命中，
+ * 返回 { base64, mime, width, height, endpoint }。 */
 async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio) {
   const root = (base || settings.upstreamBase || DEFAULT_SETTINGS.upstreamBase).replace(/\/+$/, "").replace(/\/anthropic$/, "");
   // 探测顺序：OpenAI 标准（事实主流，网关普遍兼容）优先，MiniMax 私有路径兜底；
