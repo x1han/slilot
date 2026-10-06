@@ -87,6 +87,7 @@ const I18N = {
     testChatOk: "✅ 聊天连通（{f}）：模型 {m} 回复「{r}」",
     testVisionOk: "✅ 识图可用：模型正确识别了截图内容（{r}）",
     testVisionFail: "模型回复「{r}」——该模型可能不支持图片输入，请换支持视觉的模型",
+    testVisionFake: "模型描述与实际图像不符（实际：{truth}；模型回复：{r}）——该模型可能没有真正的识图能力，请换支持视觉的模型",
     testImageOk: "✅ 生图可用：返回图片正常",
     chatFailed: "聊天失败：", visionFailed: "识图失败：", imageFailed: "生图失败：",
     testWarn: "⚠ 存在不可用项，不能保存。请更换支持全部三项能力的模型（或检查地址 / Key）后重新测试。",
@@ -123,6 +124,7 @@ const I18N = {
     testChatOk: "✅ Chat OK ({f}): model {m} replied \"{r}\"",
     testVisionOk: "✅ Vision OK: the model described the screenshot ({r})",
     testVisionFail: "The model replied \"{r}\" — it may not support image input; switch to a vision-capable model",
+    testVisionFake: "The model's description does not match the actual image (actual: {truth}; reply: {r}) — the model may lack real vision; switch to a vision-capable model",
     testImageOk: "✅ Image generation OK",
     chatFailed: "Chat failed: ", visionFailed: "Vision failed: ", imageFailed: "Image failed: ",
     testWarn: "⚠ Some checks failed — cannot save. Use a model covering all three capabilities (or check the address / key), then re-test.",
@@ -1254,16 +1256,31 @@ async function runSettingsTest() {
   })();
 
   const visionTest = (async () => {
-    const imgResp = await fetch("/test-vision.png");
-    if (!imgResp.ok) throw new Error("测试图片加载失败");
-    const blob = await imgResp.blob();
-    const dataUrl = await new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result));
-      fr.onerror = () => reject(new Error("图片转 base64 失败"));
-      fr.readAsDataURL(blob);
-    });
+    // 随机生成测试图（形状/颜色/位置每次不同），并与真值比对——提问不泄漏答案，不识图的模型无法靠猜通过
+    const colors = [
+      { name: "红色", hex: "#d64541" }, { name: "绿色", hex: "#2e9e5b" }, { name: "蓝色", hex: "#3b6ea5" },
+      { name: "黄色", hex: "#e0a800" }, { name: "紫色", hex: "#8e5bd6" }, { name: "橙色", hex: "#e07b39" },
+    ];
+    const shapes = ["圆形", "正方形", "三角形"];
+    const zones = [
+      { name: "左上", x: 88, y: 88 }, { name: "右上", x: 168, y: 88 }, { name: "中央", x: 128, y: 128 },
+      { name: "左下", x: 88, y: 168 }, { name: "右下", x: 168, y: 168 },
+    ];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const shape = shapes[Math.floor(Math.random() * shapes.length)];
+    const zone = zones[Math.floor(Math.random() * zones.length)];
+    const size = 56;
+    const cv = document.createElement("canvas");
+    cv.width = 256; cv.height = 256;
+    const c = cv.getContext("2d");
+    c.fillStyle = "#ffffff"; c.fillRect(0, 0, 256, 256);
+    c.fillStyle = color.hex; c.strokeStyle = color.hex; c.lineWidth = 6;
+    if (shape === "圆形") { c.beginPath(); c.arc(zone.x, zone.y, size / 2, 0, Math.PI * 2); c.fill(); }
+    else if (shape === "正方形") { c.fillRect(zone.x - size / 2, zone.y - size / 2, size, size); }
+    else { c.beginPath(); c.moveTo(zone.x, zone.y - size / 2); c.lineTo(zone.x - size / 2, zone.y + size / 2); c.lineTo(zone.x + size / 2, zone.y + size / 2); c.closePath(); c.fill(); }
+    const dataUrl = cv.toDataURL("image/png");
     const b64 = dataUrl.split(",")[1] || "";
+    const truth = color.name + "的" + shape + "、位于画面" + zone.name;
     const target = chatTarget(upstream, format);
     const resp = await fetch("/api/forward", {
       method: "POST",
@@ -1283,7 +1300,7 @@ async function runSettingsTest() {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: "image/png", data: b64 } },
-            { type: "text", text: "图中是否有一个圆形？请先回答「有」或「没有」，再用一句话说明它的颜色和位置。" },
+            { type: "text", text: "用一句话描述这张图片：图中的主体是什么形状、什么颜色、位于画面哪个区域（左上/右上/左下/右下/中央）？只描述你看到的内容，不要推断。" },
           ],
         }],
       }),
@@ -1291,9 +1308,10 @@ async function runSettingsTest() {
     if (!resp.ok) throw new Error("HTTP " + resp.status + " " + (await resp.text()).slice(0, 160));
     const data = await resp.json();
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    const seesImage = /有/.test(text) && !/没有/.test(text) && !/无法|不能|看不到|收不到|不支持/.test(text);
-    if (seesImage) return t("testVisionOk", { r: (text || "").slice(0, 50) });
-    throw new Error(t("testVisionFail", { r: (text || t("emptyReply")).slice(0, 60) }));
+    const ok = text.includes(color.name) && text.includes(shape) &&
+      (!/(左上|右上|左下|右下)/.test(text) || text.includes(zone.name));
+    if (ok) return t("testVisionOk", { r: (text || "").slice(0, 50) + "（实际：" + truth + "）" });
+    throw new Error(t("testVisionFake", { truth, r: (text || t("emptyReply")).slice(0, 60) }));
   })();
 
   chatTest.then(
