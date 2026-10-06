@@ -83,7 +83,7 @@ const I18N = {
     errPrefix: "出错了: ", errHint: "\n\n常见原因：本地服务没在运行（双击 start-addin.bat）、Key 无效、或网络问题。",
     wrongHost: "⚠ 请在 PowerPoint 中打开此面板",
     officeFail: "office.js 未加载（CDN 与本地回退均失败；检查网络后关闭重开面板）",
-    testing: "测试中…（聊天 / 识图 / 生图 三项并行，生图约需 5-15 秒）",
+    testing: "测试中…（聊天 / 识图 / 生图 三项并行；生图通常 5-15 秒，慢模型可达数分钟，请耐心等待）",
     testLabelChat: "聊天", testLabelVision: "识图", testLabelImage: "生图",
     testChatOk: "✅ 聊天连通（{f}）：模型 {m} 回复「{r}」",
     testVisionOk: "✅ 识图可用：模型正确识别了截图内容（{r}）",
@@ -120,7 +120,7 @@ const I18N = {
     errPrefix: "Something went wrong: ", errHint: "\n\nCommon causes: the local service isn't running (start-addin.bat), an invalid key, or network issues.",
     wrongHost: "⚠ Open this pane inside PowerPoint",
     officeFail: "office.js failed to load (both the CDN and the local fallback failed; check the network, close and reopen the pane)",
-    testing: "Testing… (chat / vision / image in parallel; image takes ~5-15s)",
+    testing: "Testing… (chat / vision / image in parallel; image usually 5-15s, slow models can take minutes — please wait)",
     testLabelChat: "Chat", testLabelVision: "Vision", testLabelImage: "Image",
     testChatOk: "✅ Chat OK ({f}): model {m} replied \"{r}\"",
     testVisionOk: "✅ Vision OK: the model described the screenshot ({r})",
@@ -523,6 +523,7 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
           "authorization": "Bearer " + key,
           "x-upstream-url": endpoint,
           "x-forward-auth": "1",
+          "x-upstream-timeout": "660000", // 慢生图渠道（如 pixel）可达数分钟，本地服务侧放宽到 11 分钟
         },
         signal,
         body: JSON.stringify({ model: imgModel, prompt, ...(aspectRatio ? { aspect_ratio: String(aspectRatio) } : {}) }),
@@ -561,7 +562,7 @@ async function requestImageGen(prompt, base, key, imgModel, signal, aspectRatio)
 }
 
 async function generateImage({ prompt, aspect_ratio }) {
-  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, null, aspect_ratio);
+  const r = await requestImageGen(String(prompt || ""), settings.imageBase || settings.upstreamBase, settings.imageKey || settings.apiKey, settings.imageModel || settings.model, AbortSignal.timeout(600000), aspect_ratio);
   const base64 = r.base64;
   if (!base64) throw new Error("图片数据为空");
   const mime = (r.mime || "image/png").toLowerCase();
@@ -1255,7 +1256,7 @@ async function runSettingsTest() {
     const imgKey = $("setImageKey").value.trim() || key;
     const imgModel = $("setImageModel").value.trim();
     if (!imgModel) throw new Error(t("noImageModel"));
-    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(45000));
+    await requestImageGen("连通测试：一枚简单的橙色五角星，扁平风格", imgBase, imgKey, imgModel, AbortSignal.timeout(300000));
     return t("testImageOk");
   })();
 

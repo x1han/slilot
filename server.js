@@ -216,7 +216,8 @@ async function handleForward(req, res) {
     method,
     headers,
     body: bodyBuffer || undefined,
-    signal: AbortSignal.timeout(300000), // 上游挂起时 5 分钟自动放弃，避免请求永久悬挂
+    // 上游挂起超时：默认 5 分钟；慢请求（如生图）可通过 x-upstream-timeout 头延长，硬上限 15 分钟
+    signal: AbortSignal.timeout(Math.min(Math.max(parseInt(req.headers["x-upstream-timeout"], 10) || 300000, 5000), 900000)),
   });
   // 响应翻译（仅成功且非 messages 格式；错误体原样透传便于排错）
   if (format !== "messages" && upstream.ok) {
