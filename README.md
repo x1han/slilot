@@ -86,11 +86,12 @@ After restarting PowerPoint, a **Slilot** button appears at the right end of the
 
 Open ⚙ in the bottom-right of the pane and fill in your model service:
 
-| Provider style | Upstream base | Protocol |
-|---|---|---|
-| Anthropic-compatible | `https://<host>/<anthropic-path>` | Anthropic — /v1/messages |
-| MiniMax (Anthropic-compatible) | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
-| OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
+| Protocol | Full chat URL |
+|---|---|
+| Anthropic — /v1/messages | `<base>/v1/messages` |
+| OpenAI — /v1/responses | `<base>/v1/responses` |
+
+(`<base>` = the upstream base you fill in above.)
 
 - The dialog has two blocks. **Text & vision model** (used for chat and screenshot review): upstream base / protocol / API key / text & vision model id. **Image model** (used for illustrations): image base / image API key — leave both empty to follow the text block's — plus a required image model id, separate from the text one (e.g. MiniMax needs `image-01`).
 - The pane UI itself is bilingual: toggle with the button next to "Settings" (Chinese by default).

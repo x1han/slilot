@@ -81,11 +81,12 @@ powershell -ExecutionPolicy Bypass -File install-sideload.ps1
 
 打开面板右下角 ⚙，填入你的模型服务信息：
 
-| 厂商风格 | 上游 Base | 接口格式 |
-|---|---|---|
-| Anthropic 兼容 | `https://<host>/<anthropic路径>` | Anthropic — /v1/messages |
-| MiniMax（Anthropic 兼容） | `https://api.minimaxi.com/anthropic` | Anthropic — /v1/messages |
-| OpenAI Responses | `https://<host>` | OpenAI — /v1/responses |
+| 接口格式 | 拼接后的完整地址 |
+|---|---|
+| Anthropic — /v1/messages | `<base>/v1/messages` |
+| OpenAI — /v1/responses | `<base>/v1/responses` |
+
+（`<base>` 即上方填写的上游 Base。）
 
 - 设置对话框分两块。**文本识图模型**（聊天与截图审查用）：上游 Base / 接口格式 / API Key / 文本识图模型 id。**生图模型**（插图用）：生图 Base / 生图 API Key——两者留空自动沿用文本块的——外加必填的生图模型 id（与文本识图模型相互独立，如 MiniMax 需 `image-01`）。
 - 面板界面本身中英双语：点「设置」标题旁的按钮切换（默认中文）。
